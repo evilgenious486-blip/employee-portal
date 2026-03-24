@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block content %}
+<h3 class="mb-4">Reports Summary</h3>
+<div class="row g-4">
+  <div class="col-lg-4"><div class="card border-0 shadow-sm rounded-4"><div class="card-body"><h5 class="mb-3">Leave Status Summary</h5><table class="table"><thead><tr><th>Status</th><th>Total</th></tr></thead><tbody>{% for row in leave_summary %}<tr><td>{{ row.status }}</td><td>{{ row.total }}</td></tr>{% else %}<tr><td colspan="2" class="text-secondary">No records</td></tr>{% endfor %}</tbody></table></div></div></div>
+  <div class="col-lg-4"><div class="card border-0 shadow-sm rounded-4"><div class="card-body"><h5 class="mb-3">Department Summary</h5><table class="table"><thead><tr><th>Department</th><th>Total Employees</th></tr></thead><tbody>{% for row in dept_summary %}<tr><td>{{ row.department_name }}</td><td>{{ row.total }}</td></tr>{% else %}<tr><td colspan="2" class="text-secondary">No records</td></tr>{% endfor %}</tbody></table></div></div></div>
+  <div class="col-lg-4"><div class="card border-0 shadow-sm rounded-4"><div class="card-body"><h5 class="mb-3">Attendance Summary</h5><table class="table"><thead><tr><th>Status</th><th>Total</th></tr></thead><tbody>{% for row in attendance_summary %}<tr><td>{{ row.status }}</td><td>{{ row.total }}</td></tr>{% else %}<tr><td colspan="2" class="text-secondary">No records</td></tr>{% endfor %}</tbody></table></div></div></div>
+</div>
+{% endblock %}

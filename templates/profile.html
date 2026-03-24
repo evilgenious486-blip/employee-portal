@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm rounded-4">
+      <div class="card-body">
+        <h4 class="mb-3">My Profile</h4>
+        <div class="mb-2"><strong>Name:</strong> {{ current_user.full_name }}</div>
+        <div class="mb-2"><strong>Employee Code:</strong> {{ current_user.employee_code }}</div>
+        <div class="mb-2"><strong>Email:</strong> {{ current_user.email }}</div>
+        <div class="mb-2"><strong>Department:</strong> {{ current_user.department_name or '-' }}</div>
+        <div class="mb-2"><strong>Designation:</strong> {{ current_user.designation_name or '-' }}</div>
+        <div class="mb-2"><strong>Reporting Manager:</strong> {{ current_user.manager_name or '-' }}</div>
+        <div class="mb-2"><strong>Join Date:</strong> {{ current_user.join_date or '-' }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-body">
+        <h4 class="mb-3">Update Contact Details</h4>
+        <form method="post">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Phone</label>
+              <input class="form-control" name="phone" value="{{ current_user.phone or '' }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Emergency Contact</label>
+              <input class="form-control" name="emergency_contact" value="{{ current_user.emergency_contact or '' }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Address</label>
+              <textarea class="form-control" name="address" rows="3">{{ current_user.address or '' }}</textarea>
+            </div>
+            <div class="col-12">
+              <button class="btn btn-primary">Save Changes</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+    <div class="card border-0 shadow-sm rounded-4">
+      <div class="card-body">
+        <h5 class="mb-3">Leave Balance</h5>
+        <div class="table-responsive">
+          <table class="table">
+            <thead><tr><th>Leave Type</th><th>Total</th><th>Used</th><th>Remaining</th></tr></thead>
+            <tbody>
+              {% for row in balances %}
+              <tr>
+                <td>{{ row.leave_type_name }}</td>
+                <td>{{ row.total_days }}</td>
+                <td>{{ row.used_days }}</td>
+                <td>{{ row.remaining_days }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

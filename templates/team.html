@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 gap-3 flex-wrap">
+  <h3 class="mb-0">Employees</h3>
+  <form class="d-flex gap-2" method="get">
+    <input class="form-control" name="q" placeholder="Search name, code, email" value="{{ search or '' }}">
+    <button class="btn btn-outline-primary">Search</button>
+  </form>
+</div>
+<div class="card border-0 shadow-sm rounded-4"><div class="card-body">
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Name</th><th>Employee Code</th><th>Department</th><th>Designation</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>
+    {% for row in employees %}<tr><td>{{ row.full_name }}</td><td>{{ row.employee_code }}</td><td>{{ row.department_name or '-' }}</td><td>{{ row.designation_name or '-' }}</td><td>{{ row.role|capitalize }}</td><td><span class="badge text-bg-light border">{{ 'Active' if row.is_active else 'Inactive' }}</span></td><td class="text-nowrap"><a href="{{ url_for('employee_detail', user_id=row.id) }}" class="btn btn-sm btn-outline-primary">Open</a> {% if current_user.role in ['hr','admin'] %}<a href="{{ url_for('edit_employee', user_id=row.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>{% endif %}</td></tr>{% else %}<tr><td colspan="7" class="text-center text-secondary py-4">No employees found.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div></div>
+{% endblock %}

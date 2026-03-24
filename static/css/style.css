@@ -1,0 +1,6 @@
+body { background: #f5f7fb; }
+.navbar-brand { font-weight: 700; }
+.card-stat { border: 0; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,.05); }
+.table thead th { white-space: nowrap; }
+.footer-note { color: #6c757d; font-size: .9rem; }
+.card, .rounded-4 { border-radius: 1rem !important; }

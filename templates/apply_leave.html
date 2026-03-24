@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm rounded-4">
+      <div class="card-body">
+        <h3 class="mb-4">Apply for Leave</h3>
+        <form method="post" enctype="multipart/form-data">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Leave Type</label>
+              <select class="form-select" name="leave_type_id" required>
+                <option value="">Select leave type</option>
+                {% for lt in leave_types %}
+                  <option value="{{ lt.id }}">{{ lt.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">From Date</label>
+              <input type="date" class="form-control" name="from_date" required>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">To Date</label>
+              <input type="date" class="form-control" name="to_date" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Reason</label>
+              <textarea class="form-control" name="reason" rows="4" required></textarea>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Attachment (optional)</label>
+              <input type="file" class="form-control" name="attachment">
+            </div>
+            <div class="col-12">
+              <button class="btn btn-primary">Submit Application</button>
+              <a href="{{ url_for('my_leaves') }}" class="btn btn-outline-secondary">Back</a>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

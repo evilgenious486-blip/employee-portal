@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4"><h3 class="mb-0">Payslips</h3></div>
+{% if employees %}
+<div class="card border-0 shadow-sm rounded-4 mb-4"><div class="card-body">
+  <form class="row g-3 align-items-end" method="get">
+    <div class="col-md-4"><label class="form-label">Employee</label><select class="form-select" name="user_id"><option value="{{ current_user.id }}">My Records</option>{% for emp in employees %}<option value="{{ emp.id }}" {% if emp.id == selected_user_id %}selected{% endif %}>{{ emp.full_name }}</option>{% endfor %}</select></div>
+    <div class="col-md-2"><button class="btn btn-primary">Filter</button></div>
+  </form>
+</div></div>
+{% endif %}
+<div class="card border-0 shadow-sm rounded-4"><div class="card-body">
+  <h5 class="mb-3">{{ selected_employee.full_name }} Payslips</h5>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Month</th><th>Basic</th><th>Allowances</th><th>Deductions</th><th>Net Salary</th><th>Generated At</th></tr></thead><tbody>{% for row in slips %}<tr><td>{{ row.month_label }}</td><td>{{ row.basic_salary }}</td><td>{{ row.allowances }}</td><td>{{ row.deductions }}</td><td class="fw-semibold">{{ row.net_salary }}</td><td>{{ row.generated_at }}</td></tr>{% else %}<tr><td colspan="6" class="text-center text-secondary py-4">No payslips found.</td></tr>{% endfor %}</tbody></table></div>
+</div></div>
+{% endblock %}

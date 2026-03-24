@@ -1,0 +1,85 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm rounded-4">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start mb-3">
+          <div>
+            <h3 class="mb-1">{{ leave.application_no }}</h3>
+            <div class="text-secondary">{{ leave.full_name }} · {{ leave.leave_type_name }}</div>
+          </div>
+          <span class="badge text-bg-light border fs-6">{{ leave.status }}</span>
+        </div>
+        <div class="row g-3">
+          <div class="col-md-4"><strong>From:</strong><br>{{ leave.from_date }}</div>
+          <div class="col-md-4"><strong>To:</strong><br>{{ leave.to_date }}</div>
+          <div class="col-md-4"><strong>Total Days:</strong><br>{{ leave.total_days }}</div>
+          <div class="col-12"><strong>Reason:</strong><br>{{ leave.reason }}</div>
+          <div class="col-md-6"><strong>Manager Status:</strong><br>{{ leave.manager_status }}</div>
+          <div class="col-md-6"><strong>HR Status:</strong><br>{{ leave.hr_status }}</div>
+          <div class="col-12">
+            <strong>Attachment:</strong><br>
+            {% if leave.attachment %}
+              <a href="{{ url_for('uploaded_file', filename=leave.attachment) }}" target="_blank">Open attachment</a>
+            {% else %}
+              -
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {% if current_user.role == 'manager' and leave.manager_status == 'Pending' %}
+    <div class="card border-0 shadow-sm rounded-4 mt-4">
+      <div class="card-body">
+        <h5 class="mb-3">Manager Action</h5>
+        <form method="post">
+          <div class="mb-3">
+            <label class="form-label">Remarks</label>
+            <textarea class="form-control" name="remarks" rows="3"></textarea>
+          </div>
+          <button name="action" value="approve" class="btn btn-success">Approve</button>
+          <button name="action" value="reject" class="btn btn-danger">Reject</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if current_user.role in ['hr', 'admin'] and leave.manager_status == 'Approved' and leave.hr_status == 'Pending' %}
+    <div class="card border-0 shadow-sm rounded-4 mt-4">
+      <div class="card-body">
+        <h5 class="mb-3">HR Final Action</h5>
+        <form method="post">
+          <div class="mb-3">
+            <label class="form-label">Remarks</label>
+            <textarea class="form-control" name="remarks" rows="3"></textarea>
+          </div>
+          <button name="action" value="approve" class="btn btn-success">Final Approve</button>
+          <button name="action" value="reject" class="btn btn-danger">Reject</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm rounded-4">
+      <div class="card-body">
+        <h5 class="mb-3">Application Timeline</h5>
+        <div class="list-group list-group-flush">
+          {% for item in history %}
+          <div class="list-group-item px-0">
+            <div class="fw-semibold">{{ item.action }}</div>
+            <div class="small text-secondary">{{ item.action_at }}{% if item.full_name %} · {{ item.full_name }}{% endif %}</div>
+            {% if item.remarks %}<div class="mt-1">{{ item.remarks }}</div>{% endif %}
+          </div>
+          {% else %}
+          <div class="text-secondary">No timeline found.</div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

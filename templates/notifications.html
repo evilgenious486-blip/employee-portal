@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h3 class="mb-0">Notifications</h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('notifications_view', mark_all=1) }}">Mark all as read</a>
+</div>
+<div class="card border-0 shadow-sm rounded-4"><div class="card-body">
+  {% for row in notifications %}
+  <div class="border rounded-3 p-3 mb-3 {% if not row.is_read %}border-primary{% endif %}">
+    <div class="d-flex justify-content-between gap-3">
+      <div>
+        <div class="fw-semibold">{{ row.title }}</div>
+        <div class="text-secondary">{{ row.message }}</div>
+      </div>
+      <div class="text-end small text-secondary">
+        <div>{{ row.created_at }}</div>
+        <a href="{{ url_for('mark_notification_read', notification_id=row.id) }}">Open</a>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="text-secondary">No notifications found.</div>
+  {% endfor %}
+</div></div>
+{% endblock %}

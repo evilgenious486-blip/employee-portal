@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div><h2 class="mb-1">Dashboard</h2><div class="text-secondary">Welcome, {{ current_user.full_name }}</div></div>
+  {% if current_user.role == 'employee' %}<a href="{{ url_for('apply_leave') }}" class="btn btn-primary">Apply Leave</a>{% endif %}
+</div>
+<div class="row g-3 mb-4">
+  <div class="col-md-3"><div class="card card-stat"><div class="card-body"><div class="text-secondary">My Leave Requests</div><div class="display-6 fw-bold">{{ counts.my_leave_count }}</div></div></div></div>
+  <div class="col-md-3"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Pending Requests</div><div class="display-6 fw-bold">{{ counts.my_pending_count }}</div></div></div></div>
+  <div class="col-md-3"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Leave Balance</div><div class="display-6 fw-bold">{{ counts.my_balance }}</div></div></div></div>
+  <div class="col-md-3"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Unread Notifications</div><div class="display-6 fw-bold">{{ counts.unread_notifications }}</div></div></div></div>
+  {% if current_user.role == 'manager' %}
+  <div class="col-md-6"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Team Members</div><div class="display-6 fw-bold">{{ counts.team_members }}</div></div></div></div>
+  <div class="col-md-6"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Pending for Approval</div><div class="display-6 fw-bold">{{ counts.manager_pending }}</div></div></div></div>
+  {% endif %}
+  {% if current_user.role in ['hr', 'admin'] %}
+  <div class="col-md-4"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Total Employees</div><div class="display-6 fw-bold">{{ counts.total_employees }}</div></div></div></div>
+  <div class="col-md-4"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Pending HR Reviews</div><div class="display-6 fw-bold">{{ counts.hr_pending }}</div></div></div></div>
+  <div class="col-md-4"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Documents</div><div class="display-6 fw-bold">{{ counts.documents_total }}</div></div></div></div>
+  {% endif %}
+  {% if current_user.role == 'admin' %}
+  <div class="col-md-12"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Queued Emails</div><div class="display-6 fw-bold">{{ counts.queued_emails }}</div></div></div></div>
+  {% endif %}
+</div>
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm rounded-4 mb-4"><div class="card-body">
+      <h5 class="mb-3">Recent Leave Activity</h5>
+      <div class="table-responsive"><table class="table align-middle"><thead><tr>{% if current_user.role != 'employee' %}<th>Employee</th>{% endif %}<th>Application No</th><th>Leave Type</th><th>From</th><th>To</th><th>Status</th><th></th></tr></thead><tbody>
+        {% for row in recent_leaves %}<tr>{% if current_user.role != 'employee' %}<td>{{ row.full_name }}</td>{% endif %}<td>{{ row.application_no }}</td><td>{{ row.leave_type_name }}</td><td>{{ row.from_date }}</td><td>{{ row.to_date }}</td><td><span class="badge text-bg-light border">{{ row.status }}</span></td><td><a href="{{ url_for('leave_detail', leave_id=row.id) }}" class="btn btn-sm btn-outline-primary">Open</a></td></tr>{% else %}<tr><td colspan="7" class="text-center text-secondary py-4">No records found.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </div></div>
+    <div class="card border-0 shadow-sm rounded-4"><div class="card-body">
+      <h5 class="mb-3">Recent Notifications</h5>
+      {% for row in recent_notifications %}
+      <div class="border rounded-3 p-3 mb-2 {% if not row.is_read %}border-primary{% endif %}">
+        <div class="d-flex justify-content-between gap-3">
+          <div>
+            <div class="fw-semibold">{{ row.title }}</div>
+            <div class="small text-secondary">{{ row.message }}</div>
+          </div>
+          <div class="text-end small text-secondary">
+            <div>{{ row.created_at }}</div>
+            <a href="{{ url_for('mark_notification_read', notification_id=row.id) }}">Open</a>
+          </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="text-secondary">No notifications.</div>
+      {% endfor %}
+    </div></div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm rounded-4"><div class="card-body">
+      <h5 class="mb-3">Recent Attendance</h5>
+      {% for row in recent_attendance %}
+      <div class="border rounded-3 p-3 mb-2">
+        <div class="fw-semibold">{{ row.attendance_date }}</div>
+        <div class="small text-secondary">{{ row.status }}{% if row.check_in %} · {{ row.check_in }} to {{ row.check_out }}{% endif %}</div>
+      </div>
+      {% else %}
+      <div class="text-secondary">No attendance records.</div>
+      {% endfor %}
+    </div></div>
+  </div>
+</div>
+{% endblock %}
