@@ -1,0 +1,12 @@
+
+{% extends 'base.html' %}
+{% block content %}
+<h3 class="mb-4">Attendance Bulk Excel Upload</h3>
+<div class="card border-0 shadow-sm rounded-4 mb-4"><div class="card-body">
+  <p class="text-secondary">Required columns in order: <code>employee_code</code>, <code>attendance_date</code>, <code>check_in</code>, <code>check_out</code>, <code>status</code>, <code>remarks</code>, <code>overtime</code>.</p>
+  <form method="post" enctype="multipart/form-data" class="row g-3 align-items-end">
+    <div class="col-md-6"><label class="form-label">Excel File (.xlsx)</label><input class="form-control" type="file" name="file" accept=".xlsx" required></div>
+    <div class="col-md-3"><button class="btn btn-primary">Upload Sheet</button></div>
+  </form>
+</div></div>
+{% endblock %}

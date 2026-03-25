@@ -1,6 +1,8 @@
+
 {% extends 'base.html' %}
 {% block content %}
 <h3 class="mb-4">Admin Settings</h3>
+<div class="mb-3 d-flex gap-2 flex-wrap"><a class="btn btn-outline-primary" href="{{ url_for('masters_view') }}">Masters Setup</a><a class="btn btn-outline-primary" href="{{ url_for('calendar_view') }}">Holiday / Vacation Calendar</a><a class="btn btn-outline-primary" href="{{ url_for('attendance_bulk_upload') }}">Attendance Bulk Upload</a></div>
 <div class="row g-4">
   <div class="col-lg-5"><div class="card border-0 shadow-sm rounded-4"><div class="card-body">
     <h5 class="mb-3">Company Configuration</h5>

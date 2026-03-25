@@ -1,0 +1,10 @@
+
+{% extends 'base.html' %}
+{% block content %}
+<h3 class="mb-4">Masters Setup</h3>
+<div class="row g-4">
+  <div class="col-lg-4"><div class="card border-0 shadow-sm rounded-4"><div class="card-body"><h5>Add Department</h5><form method="post" class="d-flex gap-2"><input type="hidden" name="action" value="department"><input class="form-control" name="name" placeholder="Department name" required><button class="btn btn-primary">Add</button></form><hr><ul class="mb-0">{% for row in departments %}<li>{{ row.name }}</li>{% endfor %}</ul></div></div></div>
+  <div class="col-lg-4"><div class="card border-0 shadow-sm rounded-4"><div class="card-body"><h5>Add Designation</h5><form method="post" class="d-flex gap-2"><input type="hidden" name="action" value="designation"><input class="form-control" name="name" placeholder="Designation name" required><button class="btn btn-primary">Add</button></form><hr><ul class="mb-0">{% for row in designations %}<li>{{ row.name }}</li>{% endfor %}</ul></div></div></div>
+  <div class="col-lg-4"><div class="card border-0 shadow-sm rounded-4"><div class="card-body"><h5>System Roles</h5><ul>{% for r in role_options %}<li>{{ r|capitalize }}</li>{% endfor %}</ul><div class="small text-secondary mb-3">Super Admin can assign roles while creating or editing employees.</div><h6>Promote Employee to Manager</h6><form method="post"><input type="hidden" name="action" value="promote_manager"><select class="form-select mb-2" name="user_id">{% for row in non_managers %}<option value="{{ row.id }}">{{ row.full_name }} · {{ row.employee_code }}</option>{% endfor %}</select><button class="btn btn-primary">Promote</button></form><hr><div class="small fw-semibold mb-2">Current Managers</div><ul class="mb-0">{% for row in managers %}<li>{{ row.full_name }} · {{ row.employee_code }}</li>{% endfor %}</ul></div></div></div>
+</div>
+{% endblock %}

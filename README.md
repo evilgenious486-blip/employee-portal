@@ -72,3 +72,11 @@ Use the employee PAC code as the login ID. Example: `PAC-249`
 - PAC-464 / Ghanem@123
 
 After updating to this version, run `/initdb` once to rebuild the database.
+
+
+V8 additions:
+- Pacost branding and logo
+- Excel bulk payslip upload (.xlsx)
+- Attendance sheet editor for admins
+- Auto payslip generation from attendance
+- Employee salary master fields in employee form

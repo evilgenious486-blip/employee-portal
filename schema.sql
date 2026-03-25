@@ -3,6 +3,7 @@ DROP TABLE IF EXISTS notifications;
 DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS payroll_slips;
 DROP TABLE IF EXISTS attendance;
+DROP TABLE IF EXISTS holiday_calendar;
 DROP TABLE IF EXISTS company_settings;
 DROP TABLE IF EXISTS leave_history;
 DROP TABLE IF EXISTS leave_applications;
@@ -37,6 +38,10 @@ CREATE TABLE users (
     address TEXT,
     emergency_contact TEXT,
     join_date TEXT,
+    monthly_basic REAL NOT NULL DEFAULT 0,
+    default_allowances REAL NOT NULL DEFAULT 0,
+    deduction_per_absent REAL NOT NULL DEFAULT 0,
+    deduction_per_late REAL NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY (department_id) REFERENCES departments (id),
     FOREIGN KEY (designation_id) REFERENCES designations (id),
@@ -108,8 +113,17 @@ CREATE TABLE attendance (
     check_out TEXT,
     status TEXT NOT NULL,
     hours_worked REAL NOT NULL DEFAULT 0,
+    ot_hours REAL NOT NULL DEFAULT 0,
     remarks TEXT,
     FOREIGN KEY (user_id) REFERENCES users (id)
+);
+
+CREATE TABLE holiday_calendar (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    holiday_date TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    holiday_type TEXT NOT NULL DEFAULT "Holiday",
+    created_at TEXT NOT NULL
 );
 
 CREATE TABLE payroll_slips (

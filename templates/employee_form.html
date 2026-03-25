@@ -15,7 +15,7 @@
             {% endif %}
             <div class="col-md-4"><label class="form-label">Role</label>
               <select class="form-select" name="role" required>
-                {% for role in ['employee','manager','hr','admin'] %}
+                {% for role in role_options %}
                 <option value="{{ role }}" {% if employee and employee.role == role %}selected{% endif %}>{{ role|capitalize }}</option>
                 {% endfor %}
               </select>

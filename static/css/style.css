@@ -4,3 +4,6 @@ body { background: #f5f7fb; }
 .table thead th { white-space: nowrap; }
 .footer-note { color: #6c757d; font-size: .9rem; }
 .card, .rounded-4 { border-radius: 1rem !important; }
+
+.navbar-brand img{object-fit:contain;}
+.login-logo{max-height:72px;}

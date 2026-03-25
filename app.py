@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, flash, g, redirect, render_template, request, send_from_directory, session, url_for
+from openpyxl import load_workbook
+import io
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
@@ -28,10 +30,85 @@ def now_str() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def calculate_hours(check_in: str | None, check_out: str | None) -> float:
+    if not check_in or not check_out:
+        return 0.0
+    try:
+        start = datetime.strptime(check_in, "%H:%M")
+        end = datetime.strptime(check_out, "%H:%M")
+        diff = (end - start).total_seconds() / 3600
+        return round(max(diff, 0), 2)
+    except Exception:
+        return 0.0
+
+
+
+def ensure_schema(db: sqlite3.Connection) -> None:
+    user_cols = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
+    if "monthly_basic" not in user_cols:
+        db.execute("ALTER TABLE users ADD COLUMN monthly_basic REAL NOT NULL DEFAULT 0")
+        db.execute("ALTER TABLE users ADD COLUMN default_allowances REAL NOT NULL DEFAULT 0")
+        db.execute("ALTER TABLE users ADD COLUMN deduction_per_absent REAL NOT NULL DEFAULT 0")
+        db.execute("ALTER TABLE users ADD COLUMN deduction_per_late REAL NOT NULL DEFAULT 0")
+    attendance_cols = {row[1] for row in db.execute("PRAGMA table_info(attendance)").fetchall()}
+    if "ot_hours" not in attendance_cols:
+        db.execute("ALTER TABLE attendance ADD COLUMN ot_hours REAL NOT NULL DEFAULT 0")
+    db.execute("""CREATE TABLE IF NOT EXISTS holiday_calendar (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        holiday_date TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        holiday_type TEXT NOT NULL DEFAULT 'Holiday',
+        created_at TEXT NOT NULL
+    )""")
+    db.commit()
+
+
+def get_role_options() -> list[str]:
+    return ["employee", "manager", "hr", "admin"]
+
+
+def get_holiday_row(db: sqlite3.Connection, attendance_date: str | None):
+    if not attendance_date:
+        return None
+    return db.execute("SELECT * FROM holiday_calendar WHERE holiday_date=?", (attendance_date,)).fetchone()
+
+
+def compute_ot_hours(db: sqlite3.Connection, attendance_date: str | None, status: str, hours_worked: float, manual_ot: float | None = None) -> float:
+    if manual_ot is not None:
+        return round(max(manual_ot, 0), 2)
+    holiday = get_holiday_row(db, attendance_date)
+    if holiday and hours_worked > 0 and status in {"Present", "Late", "Half Day", "Holiday", "Vacation"}:
+        return round(hours_worked, 2)
+    return 0.0
+
+
+def upsert_payroll_from_attendance(user_id: int, month_value: str) -> None:
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if not user:
+        return
+    month_prefix = datetime.strptime(month_value, "%Y-%m").strftime("%Y-%m")
+    rows = db.execute("SELECT * FROM attendance WHERE user_id=? AND substr(attendance_date,1,7)=?", (user_id, month_prefix)).fetchall()
+    late_days = sum(1 for r in rows if r["status"] == "Late")
+    absent_days = sum(1 for r in rows if r["status"] == "Absent")
+    half_days = sum(1 for r in rows if r["status"] == "Half Day")
+    day_rate = (user["monthly_basic"] or 0) / 30 if (user["monthly_basic"] or 0) else 0
+    absent_rate = user["deduction_per_absent"] or day_rate
+    deductions = round(absent_days * absent_rate + half_days * 0.5 * absent_rate + late_days * (user["deduction_per_late"] or 0), 2)
+    net_salary = round((user["monthly_basic"] or 0) + (user["default_allowances"] or 0) - deductions, 2)
+    month_label = datetime.strptime(month_value, "%Y-%m").strftime("%b %Y")
+    existing = db.execute("SELECT id FROM payroll_slips WHERE user_id=? AND month_label=?", (user_id, month_label)).fetchone()
+    if existing:
+        db.execute("UPDATE payroll_slips SET basic_salary=?, allowances=?, deductions=?, net_salary=?, generated_at=? WHERE id=?", ((user["monthly_basic"] or 0), (user["default_allowances"] or 0), deductions, net_salary, now_str(), existing["id"]))
+    else:
+        db.execute("INSERT INTO payroll_slips(user_id, month_label, basic_salary, allowances, deductions, net_salary, generated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (user_id, month_label, (user["monthly_basic"] or 0), (user["default_allowances"] or 0), deductions, net_salary, now_str()))
+
+
 def get_db() -> sqlite3.Connection:
     if "db" not in g:
         g.db = sqlite3.connect(DATABASE)
         g.db.row_factory = sqlite3.Row
+        ensure_schema(g.db)
     return g.db
 
 
@@ -559,7 +636,7 @@ def seed_data() -> None:
 
     db.execute(
         "INSERT INTO company_settings(company_name, leave_workflow, default_working_hours, allow_document_upload) VALUES (?, ?, ?, ?)",
-        ("Employee Portal Demo", "Site Engineer / Site Staff → Site Manager → HR Final Review", 8.0, 1),
+        ("Pacost International", "Site Engineer / Site Staff → Site Manager → HR Final Review", 8.0, 1),
     )
 
     created_at = now_str()
@@ -636,6 +713,8 @@ def seed_data() -> None:
     ]
     db.executemany("INSERT INTO email_queue(to_user_id, to_email, subject, body, status, created_at) VALUES (?, ?, ?, ?, ?, ?)", email_seed)
 
+    db.execute("UPDATE users SET monthly_basic=?, default_allowances=?, deduction_per_absent=?, deduction_per_late=? WHERE email=?", (9500, 1500, 316.67, 50, "manager@example.com"))
+    db.execute("UPDATE users SET monthly_basic=?, default_allowances=?, deduction_per_absent=?, deduction_per_late=? WHERE employee_code=?", (9500, 1500, 316.67, 50, "PAC-249"))
     db.commit()
     db.close()
 
@@ -948,8 +1027,8 @@ def employee_form_handler(user_id: int | None = None):
         manager_id = form.get("manager_id") or None
         if user_id is None:
             db.execute(
-                "INSERT INTO users(full_name, email, employee_code, password_hash, role, department_id, designation_id, manager_id, phone, address, emergency_contact, join_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (form["full_name"].strip(), form["email"].strip(), form["employee_code"].strip(), generate_password_hash(form["password"]), form["role"], form["department_id"], form["designation_id"], manager_id, form["phone"].strip(), form["address"].strip(), form["emergency_contact"].strip(), form["join_date"], 1 if form.get("is_active", "1") == "1" else 0),
+                "INSERT INTO users(full_name, email, employee_code, password_hash, role, department_id, designation_id, manager_id, phone, address, emergency_contact, join_date, monthly_basic, default_allowances, deduction_per_absent, deduction_per_late, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (form["full_name"].strip(), form["email"].strip(), form["employee_code"].strip(), generate_password_hash(form["password"]), form["role"], form["department_id"], form["designation_id"], manager_id, form["phone"].strip(), form["address"].strip(), form["emergency_contact"].strip(), form["join_date"], float(form.get("monthly_basic") or 0), float(form.get("default_allowances") or 0), float(form.get("deduction_per_absent") or 0), float(form.get("deduction_per_late") or 0), 1 if form.get("is_active", "1") == "1" else 0),
             )
             new_id = db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
             for lt in db.execute("SELECT id, annual_quota FROM leave_types").fetchall():
@@ -960,15 +1039,15 @@ def employee_form_handler(user_id: int | None = None):
             flash("Employee created successfully.", "success")
             return redirect(url_for("employee_detail", user_id=new_id))
         db.execute(
-            "UPDATE users SET full_name=?, email=?, employee_code=?, role=?, department_id=?, designation_id=?, manager_id=?, phone=?, address=?, emergency_contact=?, join_date=?, is_active=? WHERE id=?",
-            (form["full_name"].strip(), form["email"].strip(), form["employee_code"].strip(), form["role"], form["department_id"], form["designation_id"], manager_id, form["phone"].strip(), form["address"].strip(), form["emergency_contact"].strip(), form["join_date"], 1 if form.get("is_active", "1") == "1" else 0, user_id),
+            "UPDATE users SET full_name=?, email=?, employee_code=?, role=?, department_id=?, designation_id=?, manager_id=?, phone=?, address=?, emergency_contact=?, join_date=?, monthly_basic=?, default_allowances=?, deduction_per_absent=?, deduction_per_late=?, is_active=? WHERE id=?",
+            (form["full_name"].strip(), form["email"].strip(), form["employee_code"].strip(), form["role"], form["department_id"], form["designation_id"], manager_id, form["phone"].strip(), form["address"].strip(), form["emergency_contact"].strip(), form["join_date"], float(form.get("monthly_basic") or 0), float(form.get("default_allowances") or 0), float(form.get("deduction_per_absent") or 0), float(form.get("deduction_per_late") or 0), 1 if form.get("is_active", "1") == "1" else 0, user_id),
         )
         notify_user(user_id, "Profile updated", "Your employee profile details were updated by HR/Admin.", url_for("employee_detail", user_id=user_id))
         log_audit("Employee", "Updated", f"Updated employee {form['employee_code']}", user_id)
         db.commit()
         flash("Employee updated successfully.", "success")
         return redirect(url_for("employee_detail", user_id=user_id))
-    return render_template("employee_form.html", departments=departments, designations=designations, managers=managers, employee=employee)
+    return render_template("employee_form.html", departments=departments, designations=designations, managers=managers, employee=employee, role_options=get_role_options())
 
 
 @app.route("/employees/<int:user_id>/delete", methods=["POST"])
@@ -1032,7 +1111,10 @@ def attendance_view():
         allowed = db.execute("SELECT COUNT(*) AS c FROM users WHERE id=? AND manager_id=?", (selected_user_id, user["id"])).fetchone()["c"]
         if selected_user_id != user["id"] and not allowed:
             selected_user_id = user["id"]
-    rows = db.execute("SELECT * FROM attendance WHERE user_id=? AND substr(attendance_date,1,7)=? ORDER BY attendance_date DESC", (selected_user_id, month)).fetchall()
+    rows = db.execute(
+        "SELECT a.*, hc.title AS holiday_title, hc.holiday_type FROM attendance a LEFT JOIN holiday_calendar hc ON a.attendance_date=hc.holiday_date WHERE a.user_id=? AND substr(a.attendance_date,1,7)=? ORDER BY a.attendance_date DESC",
+        (selected_user_id, month),
+    ).fetchall()
     employees = []
     if user["role"] in {"manager", "hr", "admin"}:
         if user["role"] == "manager":
@@ -1044,9 +1126,11 @@ def attendance_view():
         "absent": sum(1 for r in rows if r["status"] == "Absent"),
         "late": sum(1 for r in rows if r["status"] == "Late"),
         "hours": round(sum(r["hours_worked"] for r in rows), 1),
+        "ot_hours": round(sum((r["ot_hours"] or 0) for r in rows), 1),
     }
     selected_employee = db.execute("SELECT id, full_name FROM users WHERE id=?", (selected_user_id,)).fetchone()
-    return render_template("attendance.html", rows=rows, employees=employees, selected_user_id=selected_user_id, month=month, summary=summary, selected_employee=selected_employee)
+    holiday_rows = db.execute("SELECT * FROM holiday_calendar WHERE substr(holiday_date,1,7)=? ORDER BY holiday_date", (month,)).fetchall()
+    return render_template("attendance.html", rows=rows, employees=employees, selected_user_id=selected_user_id, month=month, summary=summary, selected_employee=selected_employee, holiday_rows=holiday_rows)
 
 
 @app.route("/payroll")
@@ -1071,6 +1155,165 @@ def payroll_view():
     selected_employee = db.execute("SELECT id, full_name FROM users WHERE id=?", (selected_user_id,)).fetchone()
     return render_template("payroll.html", slips=slips, employees=employees, selected_user_id=selected_user_id, selected_employee=selected_employee)
 
+
+
+
+@app.route("/attendance/add", methods=["GET", "POST"])
+@login_required
+@role_required("admin")
+def attendance_add():
+    db = get_db()
+    employees = db.execute("SELECT id, full_name FROM users WHERE is_active=1 ORDER BY full_name").fetchall()
+    statuses = ["Present", "Absent", "Leave", "Late", "Half Day", "Holiday", "Vacation"]
+    if request.method == "POST":
+        user_id = request.form.get("user_id", type=int)
+        attendance_date = (request.form.get("attendance_date") or "").strip()
+        check_in = (request.form.get("check_in") or "").strip() or None
+        check_out = (request.form.get("check_out") or "").strip() or None
+        status = (request.form.get("status") or "Present").strip()
+        remarks = (request.form.get("remarks") or "").strip() or None
+        hours_worked = request.form.get("hours_worked", type=float)
+        if hours_worked is None:
+            hours_worked = calculate_hours(check_in, check_out)
+        manual_ot = request.form.get("ot_hours", type=float)
+        ot_hours = compute_ot_hours(db, attendance_date, status, hours_worked, manual_ot)
+        if not user_id or not attendance_date:
+            flash("Employee and date are required.", "danger")
+        else:
+            db.execute(
+                "INSERT INTO attendance(user_id, attendance_date, check_in, check_out, status, hours_worked, ot_hours, remarks) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_id, attendance_date, check_in, check_out, status, hours_worked, ot_hours, remarks),
+            )
+            employee = db.execute("SELECT full_name FROM users WHERE id=?", (user_id,)).fetchone()
+            log_audit("Attendance", "Added", f"Added attendance for {employee['full_name']} on {attendance_date}", user_id)
+            db.commit()
+            flash("Attendance record added.", "success")
+            return redirect(url_for("attendance_view", user_id=user_id, month=attendance_date[:7]))
+    return render_template("attendance_form.html", record=None, employees=employees, statuses=statuses)
+
+
+@app.route("/attendance/edit/<int:attendance_id>", methods=["GET", "POST"])
+@login_required
+@role_required("admin")
+def attendance_edit(attendance_id: int):
+    db = get_db()
+    record = db.execute("SELECT * FROM attendance WHERE id=?", (attendance_id,)).fetchone()
+    if not record:
+        flash("Attendance record not found.", "danger")
+        return redirect(url_for("attendance_view"))
+    employees = db.execute("SELECT id, full_name FROM users WHERE is_active=1 ORDER BY full_name").fetchall()
+    statuses = ["Present", "Absent", "Leave", "Late", "Half Day", "Holiday", "Vacation"]
+    if request.method == "POST":
+        user_id = request.form.get("user_id", type=int)
+        attendance_date = (request.form.get("attendance_date") or "").strip()
+        check_in = (request.form.get("check_in") or "").strip() or None
+        check_out = (request.form.get("check_out") or "").strip() or None
+        status = (request.form.get("status") or "Present").strip()
+        remarks = (request.form.get("remarks") or "").strip() or None
+        hours_worked = request.form.get("hours_worked", type=float)
+        if hours_worked is None:
+            hours_worked = calculate_hours(check_in, check_out)
+        manual_ot = request.form.get("ot_hours", type=float)
+        ot_hours = compute_ot_hours(db, attendance_date, status, hours_worked, manual_ot)
+        db.execute(
+            "UPDATE attendance SET user_id=?, attendance_date=?, check_in=?, check_out=?, status=?, hours_worked=?, ot_hours=?, remarks=? WHERE id=?",
+            (user_id, attendance_date, check_in, check_out, status, hours_worked, ot_hours, remarks, attendance_id),
+        )
+        employee = db.execute("SELECT full_name FROM users WHERE id=?", (user_id,)).fetchone()
+        log_audit("Attendance", "Edited", f"Edited attendance for {employee['full_name']} on {attendance_date}", user_id)
+        db.commit()
+        flash("Attendance record updated.", "success")
+        return redirect(url_for("attendance_view", user_id=user_id, month=attendance_date[:7]))
+    return render_template("attendance_form.html", record=record, employees=employees, statuses=statuses)
+
+
+@app.route("/attendance/delete/<int:attendance_id>", methods=["POST"])
+@login_required
+@role_required("admin")
+def attendance_delete(attendance_id: int):
+    db = get_db()
+    record = db.execute("SELECT * FROM attendance WHERE id=?", (attendance_id,)).fetchone()
+    if not record:
+        flash("Attendance record not found.", "danger")
+        return redirect(url_for("attendance_view"))
+    db.execute("DELETE FROM attendance WHERE id=?", (attendance_id,))
+    log_audit("Attendance", "Deleted", f"Deleted attendance entry on {record['attendance_date']}", record['user_id'])
+    db.commit()
+    flash("Attendance record deleted.", "success")
+    return redirect(url_for("attendance_view", user_id=record['user_id'], month=str(record['attendance_date'])[:7]))
+
+
+@app.route("/payroll/add", methods=["GET", "POST"])
+@login_required
+@role_required("admin")
+def payroll_add():
+    db = get_db()
+    employees = db.execute("SELECT id, full_name FROM users WHERE is_active=1 ORDER BY full_name").fetchall()
+    if request.method == "POST":
+        user_id = request.form.get("user_id", type=int)
+        month_label = (request.form.get("month_label") or "").strip()
+        basic_salary = request.form.get("basic_salary", type=float) or 0.0
+        allowances = request.form.get("allowances", type=float) or 0.0
+        deductions = request.form.get("deductions", type=float) or 0.0
+        net_salary = basic_salary + allowances - deductions
+        if not user_id or not month_label:
+            flash("Employee and month are required.", "danger")
+        else:
+            db.execute(
+                "INSERT INTO payroll_slips(user_id, month_label, basic_salary, allowances, deductions, net_salary, generated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user_id, month_label, basic_salary, allowances, deductions, net_salary, now_str()),
+            )
+            employee = db.execute("SELECT full_name FROM users WHERE id=?", (user_id,)).fetchone()
+            log_audit("Payroll", "Added", f"Added payslip for {employee['full_name']} ({month_label})", user_id)
+            db.commit()
+            flash("Payslip added.", "success")
+            return redirect(url_for("payroll_view", user_id=user_id))
+    return render_template("payroll_form.html", slip=None, employees=employees)
+
+
+@app.route("/payroll/edit/<int:slip_id>", methods=["GET", "POST"])
+@login_required
+@role_required("admin")
+def payroll_edit(slip_id: int):
+    db = get_db()
+    slip = db.execute("SELECT * FROM payroll_slips WHERE id=?", (slip_id,)).fetchone()
+    if not slip:
+        flash("Payslip not found.", "danger")
+        return redirect(url_for("payroll_view"))
+    employees = db.execute("SELECT id, full_name FROM users WHERE is_active=1 ORDER BY full_name").fetchall()
+    if request.method == "POST":
+        user_id = request.form.get("user_id", type=int)
+        month_label = (request.form.get("month_label") or "").strip()
+        basic_salary = request.form.get("basic_salary", type=float) or 0.0
+        allowances = request.form.get("allowances", type=float) or 0.0
+        deductions = request.form.get("deductions", type=float) or 0.0
+        net_salary = basic_salary + allowances - deductions
+        db.execute(
+            "UPDATE payroll_slips SET user_id=?, month_label=?, basic_salary=?, allowances=?, deductions=?, net_salary=? WHERE id=?",
+            (user_id, month_label, basic_salary, allowances, deductions, net_salary, slip_id),
+        )
+        employee = db.execute("SELECT full_name FROM users WHERE id=?", (user_id,)).fetchone()
+        log_audit("Payroll", "Edited", f"Edited payslip for {employee['full_name']} ({month_label})", user_id)
+        db.commit()
+        flash("Payslip updated.", "success")
+        return redirect(url_for("payroll_view", user_id=user_id))
+    return render_template("payroll_form.html", slip=slip, employees=employees)
+
+
+@app.route("/payroll/delete/<int:slip_id>", methods=["POST"])
+@login_required
+@role_required("admin")
+def payroll_delete(slip_id: int):
+    db = get_db()
+    slip = db.execute("SELECT * FROM payroll_slips WHERE id=?", (slip_id,)).fetchone()
+    if not slip:
+        flash("Payslip not found.", "danger")
+        return redirect(url_for("payroll_view"))
+    db.execute("DELETE FROM payroll_slips WHERE id=?", (slip_id,))
+    log_audit("Payroll", "Deleted", f"Deleted payslip {slip['month_label']}", slip['user_id'])
+    db.commit()
+    flash("Payslip deleted.", "success")
+    return redirect(url_for("payroll_view", user_id=slip['user_id']))
 
 @app.route("/reports")
 @login_required
@@ -1170,6 +1413,210 @@ def mark_email_sent(email_id: int):
     db.commit()
     flash("Email marked as sent.", "success")
     return redirect(url_for("email_center"))
+
+
+@app.route("/payroll/bulk-upload", methods=["GET", "POST"])
+@login_required
+@role_required("admin")
+def payroll_bulk_upload():
+    db = get_db()
+    if request.method == "POST":
+        file = request.files.get("file")
+        if not file or not file.filename:
+            flash("Please choose an Excel file.", "danger")
+            return redirect(url_for("payroll_bulk_upload"))
+        try:
+            wb = load_workbook(io.BytesIO(file.read()), data_only=True)
+            ws = wb.active
+            count = 0
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if not row or not row[0]:
+                    continue
+                employee_code = str(row[0]).strip()
+                month_label = str(row[1]).strip()
+                basic_salary = float(row[2] or 0)
+                allowances = float(row[3] or 0)
+                deductions = float(row[4] or 0)
+                user = db.execute("SELECT id FROM users WHERE employee_code=?", (employee_code,)).fetchone()
+                if not user:
+                    continue
+                net_salary = round(basic_salary + allowances - deductions, 2)
+                existing = db.execute("SELECT id FROM payroll_slips WHERE user_id=? AND month_label=?", (user["id"], month_label)).fetchone()
+                if existing:
+                    db.execute("UPDATE payroll_slips SET basic_salary=?, allowances=?, deductions=?, net_salary=?, generated_at=? WHERE id=?", (basic_salary, allowances, deductions, net_salary, now_str(), existing["id"]))
+                else:
+                    db.execute("INSERT INTO payroll_slips(user_id, month_label, basic_salary, allowances, deductions, net_salary, generated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (user["id"], month_label, basic_salary, allowances, deductions, net_salary, now_str()))
+                count += 1
+            db.commit()
+            flash(f"Payslips imported/updated for {count} rows.", "success")
+            return redirect(url_for("payroll_view"))
+        except Exception as exc:
+            flash(f"Upload failed: {exc}", "danger")
+    return render_template("payroll_bulk_upload.html")
+
+
+@app.route("/payroll/generate-auto", methods=["GET", "POST"])
+@login_required
+@role_required("admin")
+def payroll_generate_auto():
+    db = get_db()
+    employees = db.execute("SELECT id, full_name, employee_code FROM users WHERE is_active=1 ORDER BY full_name").fetchall()
+    month = request.form.get("month") or date.today().strftime("%Y-%m")
+    if request.method == "POST":
+        user_id = request.form.get("user_id", type=int)
+        if user_id:
+            upsert_payroll_from_attendance(user_id, month)
+        else:
+            for emp in employees:
+                upsert_payroll_from_attendance(emp["id"], month)
+        db.commit()
+        flash("Payslip generation completed.", "success")
+        return redirect(url_for("payroll_view"))
+    return render_template("payroll_generate_auto.html", employees=employees, month=month)
+
+
+@app.route("/attendance/bulk-upload", methods=["GET", "POST"])
+@login_required
+@role_required("admin")
+def attendance_bulk_upload():
+    db = get_db()
+    if request.method == "POST":
+        file = request.files.get("file")
+        if not file or not file.filename:
+            flash("Please choose an Excel file.", "danger")
+            return redirect(url_for("attendance_bulk_upload"))
+        try:
+            wb = load_workbook(io.BytesIO(file.read()), data_only=True)
+            ws = wb.active
+            count = 0
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if not row or not row[0] or not row[1]:
+                    continue
+                employee_code = str(row[0]).strip()
+                attendance_date = str(row[1]).strip()
+                check_in = str(row[2]).strip() if len(row) > 2 and row[2] not in (None, "") else None
+                check_out = str(row[3]).strip() if len(row) > 3 and row[3] not in (None, "") else None
+                status = str(row[4]).strip() if len(row) > 4 and row[4] not in (None, "") else "Present"
+                remarks = str(row[5]).strip() if len(row) > 5 and row[5] not in (None, "") else None
+                manual_ot = float(row[6]) if len(row) > 6 and row[6] not in (None, "") else None
+                user = db.execute("SELECT id FROM users WHERE employee_code=?", (employee_code,)).fetchone()
+                if not user:
+                    continue
+                hours_worked = calculate_hours(check_in, check_out)
+                ot_hours = compute_ot_hours(db, attendance_date, status, hours_worked, manual_ot)
+                existing = db.execute("SELECT id FROM attendance WHERE user_id=? AND attendance_date=?", (user["id"], attendance_date)).fetchone()
+                if existing:
+                    db.execute("UPDATE attendance SET check_in=?, check_out=?, status=?, hours_worked=?, ot_hours=?, remarks=? WHERE id=?", (check_in, check_out, status, hours_worked, ot_hours, remarks, existing["id"]))
+                else:
+                    db.execute("INSERT INTO attendance(user_id, attendance_date, check_in, check_out, status, hours_worked, ot_hours, remarks) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (user["id"], attendance_date, check_in, check_out, status, hours_worked, ot_hours, remarks))
+                count += 1
+            db.commit()
+            flash(f"Attendance imported/updated for {count} rows.", "success")
+            return redirect(url_for("attendance_view"))
+        except Exception as exc:
+            flash(f"Upload failed: {exc}", "danger")
+    return render_template("attendance_bulk_upload.html")
+
+
+@app.route("/attendance/monthly-editor", methods=["GET", "POST"])
+@login_required
+@role_required("admin")
+def attendance_monthly_editor():
+    db = get_db()
+    attendance_date = request.values.get("attendance_date") or date.today().strftime("%Y-%m-%d")
+    employees = db.execute("SELECT id, full_name, employee_code FROM users WHERE is_active=1 ORDER BY full_name").fetchall()
+    statuses = ["Present", "Absent", "Leave", "Late", "Half Day", "Holiday", "Vacation"]
+    existing_rows = {r["user_id"]: r for r in db.execute("SELECT * FROM attendance WHERE attendance_date=?", (attendance_date,)).fetchall()}
+    if request.method == "POST":
+        for emp in employees:
+            prefix = f"emp_{emp['id']}_"
+            status = request.form.get(prefix + "status", "Present")
+            check_in = (request.form.get(prefix + "check_in") or "").strip() or None
+            check_out = (request.form.get(prefix + "check_out") or "").strip() or None
+            remarks = (request.form.get(prefix + "remarks") or "").strip() or None
+            hours = calculate_hours(check_in, check_out)
+            ot_hours = compute_ot_hours(db, attendance_date, status, hours)
+            current = existing_rows.get(emp["id"])
+            if current:
+                db.execute("UPDATE attendance SET status=?, check_in=?, check_out=?, hours_worked=?, ot_hours=?, remarks=? WHERE id=?", (status, check_in, check_out, hours, ot_hours, remarks, current["id"]))
+            else:
+                db.execute("INSERT INTO attendance(user_id, attendance_date, check_in, check_out, status, hours_worked, ot_hours, remarks) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (emp["id"], attendance_date, check_in, check_out, status, hours, ot_hours, remarks))
+        db.commit()
+        flash("Attendance sheet saved successfully.", "success")
+        return redirect(url_for("attendance_monthly_editor", attendance_date=attendance_date))
+    holiday_row = get_holiday_row(db, attendance_date)
+    return render_template("attendance_monthly_editor.html", employees=employees, existing=existing_rows, statuses=statuses, attendance_date=attendance_date, holiday_row=holiday_row)
+
+
+@app.route("/masters", methods=["GET", "POST"])
+@login_required
+@role_required("admin")
+def masters_view():
+    db = get_db()
+    if request.method == "POST":
+        action = request.form.get("action")
+        try:
+            if action == "department":
+                name = (request.form.get("name") or "").strip()
+                if name:
+                    db.execute("INSERT INTO departments(name) VALUES (?)", (name,))
+                    flash("Department added.", "success")
+            elif action == "designation":
+                name = (request.form.get("name") or "").strip()
+                if name:
+                    db.execute("INSERT INTO designations(name) VALUES (?)", (name,))
+                    flash("Designation added.", "success")
+            elif action == "promote_manager":
+                user_id = request.form.get("user_id", type=int)
+                if user_id:
+                    db.execute("UPDATE users SET role='manager' WHERE id=?", (user_id,))
+                    flash("User promoted to manager.", "success")
+            db.commit()
+        except sqlite3.IntegrityError:
+            flash("This value already exists.", "warning")
+        return redirect(url_for("masters_view"))
+    departments = db.execute("SELECT * FROM departments ORDER BY name").fetchall()
+    designations = db.execute("SELECT * FROM designations ORDER BY name").fetchall()
+    managers = db.execute("SELECT id, full_name, employee_code FROM users WHERE role='manager' AND is_active=1 ORDER BY full_name").fetchall()
+    non_managers = db.execute("SELECT id, full_name, employee_code FROM users WHERE role!='manager' AND is_active=1 ORDER BY full_name").fetchall()
+    return render_template("masters.html", departments=departments, designations=designations, managers=managers, non_managers=non_managers, role_options=get_role_options())
+
+
+@app.route("/calendar", methods=["GET", "POST"])
+@login_required
+@role_required("admin")
+def calendar_view():
+    db = get_db()
+    if request.method == "POST":
+        holiday_date = (request.form.get("holiday_date") or "").strip()
+        title = (request.form.get("title") or "").strip()
+        holiday_type = (request.form.get("holiday_type") or "Holiday").strip()
+        if holiday_date and title:
+            existing = db.execute("SELECT id FROM holiday_calendar WHERE holiday_date=?", (holiday_date,)).fetchone()
+            if existing:
+                db.execute("UPDATE holiday_calendar SET title=?, holiday_type=? WHERE id=?", (title, holiday_type, existing["id"]))
+                flash("Calendar day updated.", "success")
+            else:
+                db.execute("INSERT INTO holiday_calendar(holiday_date, title, holiday_type, created_at) VALUES (?, ?, ?, ?)", (holiday_date, title, holiday_type, now_str()))
+                flash("Calendar day added.", "success")
+            db.commit()
+        else:
+            flash("Date and title are required.", "danger")
+        return redirect(url_for("calendar_view"))
+    month = request.args.get("month") or date.today().strftime("%Y-%m")
+    rows = db.execute("SELECT * FROM holiday_calendar WHERE substr(holiday_date,1,7)=? ORDER BY holiday_date", (month,)).fetchall()
+    return render_template("calendar.html", rows=rows, month=month)
+
+
+@app.route("/calendar/delete/<int:holiday_id>", methods=["POST"])
+@login_required
+@role_required("admin")
+def calendar_delete(holiday_id: int):
+    db = get_db()
+    db.execute("DELETE FROM holiday_calendar WHERE id=?", (holiday_id,))
+    db.commit()
+    flash("Calendar day removed.", "success")
+    return redirect(url_for("calendar_view"))
 
 
 @app.route("/settings", methods=["GET", "POST"])
