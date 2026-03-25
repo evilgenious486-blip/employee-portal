@@ -1,7 +1,6 @@
-Flask==3.1.0
-Werkzeug==3.1.3
-<<<<<<< HEAD
-openpyxl==3.1.5
-=======
-gunicorn
->>>>>>> 20364972ec688f0e8c39b885d29fb69c4cc80b22
+Django>=4.2,<5.0
+gunicorn>=21.2.0
+whitenoise>=6.6.0
+psycopg2-binary>=2.9.9
+pandas>=2.0.0
+openpyxl>=3.1.2
