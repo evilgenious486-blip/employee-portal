@@ -6,6 +6,7 @@ DROP TABLE IF EXISTS attendance;
 DROP TABLE IF EXISTS holiday_calendar;
 DROP TABLE IF EXISTS company_settings;
 DROP TABLE IF EXISTS leave_history;
+DROP TABLE IF EXISTS leave_approval_steps;
 DROP TABLE IF EXISTS leave_applications;
 DROP TABLE IF EXISTS leave_balances;
 DROP TABLE IF EXISTS leave_types;
@@ -83,6 +84,19 @@ CREATE TABLE leave_applications (
     created_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users (id),
     FOREIGN KEY (leave_type_id) REFERENCES leave_types (id)
+);
+
+CREATE TABLE leave_approval_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    leave_application_id INTEGER NOT NULL,
+    step_no INTEGER NOT NULL,
+    approver_user_id INTEGER NOT NULL,
+    approver_title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Waiting',
+    remarks TEXT,
+    action_at TEXT,
+    FOREIGN KEY (leave_application_id) REFERENCES leave_applications (id),
+    FOREIGN KEY (approver_user_id) REFERENCES users (id)
 );
 
 CREATE TABLE leave_history (

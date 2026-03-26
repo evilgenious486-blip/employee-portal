@@ -13,7 +13,7 @@
             {% if not employee %}
             <div class="col-md-4"><label class="form-label">Password</label><input class="form-control" name="password" required></div>
             {% endif %}
-            <div class="col-md-4"><label class="form-label">Role</label>
+            <div class="col-md-4"><label class="form-label">Portal Role</label>
               <select class="form-select" name="role" required>
                 {% for role in role_options %}
                 <option value="{{ role }}" {% if employee and employee.role == role %}selected{% endif %}>{{ role|capitalize }}</option>
@@ -23,7 +23,7 @@
             <div class="col-md-4"><label class="form-label">Department</label>
               <select class="form-select" name="department_id" required>{% for row in departments %}<option value="{{ row.id }}" {% if employee and employee.department_id == row.id %}selected{% endif %}>{{ row.name }}</option>{% endfor %}</select>
             </div>
-            <div class="col-md-4"><label class="form-label">Designation</label>
+            <div class="col-md-4"><label class="form-label">Designation</label><div class="form-text mb-1">Use designations like Department Engineer, Safety Engineer, Project Engineer, Site Manager, Supervisor, Worker or Technician.</div>
               <select class="form-select" name="designation_id" required>{% for row in designations %}<option value="{{ row.id }}" {% if employee and employee.designation_id == row.id %}selected{% endif %}>{{ row.name }}</option>{% endfor %}</select>
             </div>
             <div class="col-md-4"><label class="form-label">Manager</label>

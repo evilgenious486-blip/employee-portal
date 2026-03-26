@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 gap-3 flex-wrap">
+  <div>
+    <h3 class="mb-1">Bulk Employee Add</h3>
+    <div class="text-secondary">Upload an Excel sheet to create multiple employees in one step.</div>
+  </div>
+  <a class="btn btn-outline-secondary" href="{{ url_for('team') }}"><i class="bi bi-arrow-left me-1"></i>Back to Employees</a>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm rounded-4">
+      <div class="card-body">
+        <form method="post" enctype="multipart/form-data">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Excel file</label>
+            <input class="form-control" type="file" name="file" accept=".xlsx" required>
+            <div class="form-text">Only .xlsx files are supported.</div>
+          </div>
+          <button class="btn btn-primary"><i class="bi bi-file-earmark-arrow-up me-1"></i>Upload and Create Employees</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm rounded-4 h-100">
+      <div class="card-body">
+        <h5 class="mb-3">Required columns</h5>
+        <div class="small text-secondary mb-2">Use these exact header names in row 1:</div>
+        <div class="bg-light rounded-4 p-3 small" style="word-break:break-word">
+          {{ sample_headers|join(', ') }}
+        </div>
+        <hr>
+        <div class="small text-secondary">
+          Optional fields such as <strong>manager_email</strong>, <strong>phone</strong>, <strong>address</strong>, salary values, and <strong>is_active</strong> can also be included. Departments and designations are created automatically if they do not already exist.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

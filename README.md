@@ -80,3 +80,6 @@ V8 additions:
 - Attendance sheet editor for admins
 - Auto payslip generation from attendance
 - Employee salary master fields in employee form
+
+
+UI upgraded to v13 with premium sidebar layout, dark/light theme toggle, analytics quick panels, and refined dashboard presentation.

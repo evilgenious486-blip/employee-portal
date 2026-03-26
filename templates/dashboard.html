@@ -1,67 +1,231 @@
 {% extends 'base.html' %}
+{% set title = 'Dashboard' %}
+
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <div><h2 class="mb-1">Dashboard</h2><div class="text-secondary">Welcome, {{ current_user.full_name }}</div></div>
-  {% if current_user.role == 'employee' %}<a href="{{ url_for('apply_leave') }}" class="btn btn-primary">Apply Leave</a>{% endif %}
-</div>
-<div class="row g-3 mb-4">
-  <div class="col-md-3"><div class="card card-stat"><div class="card-body"><div class="text-secondary">My Leave Requests</div><div class="display-6 fw-bold">{{ counts.my_leave_count }}</div></div></div></div>
-  <div class="col-md-3"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Pending Requests</div><div class="display-6 fw-bold">{{ counts.my_pending_count }}</div></div></div></div>
-  <div class="col-md-3"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Leave Balance</div><div class="display-6 fw-bold">{{ counts.my_balance }}</div></div></div></div>
-  <div class="col-md-3"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Unread Notifications</div><div class="display-6 fw-bold">{{ counts.unread_notifications }}</div></div></div></div>
+
+<section class="hero-panel">
+
+  <div class="hero-copy">
+
+    <div class="eyebrow" style="font-size:12px; letter-spacing:1px;">
+      PACOST DIGITAL WORKSPACE
+    </div>
+
+    <h1 style="
+        font-size:26px;
+        font-weight:600;
+        margin-bottom:6px;
+        line-height:1.25;
+        letter-spacing:0.2px;">
+        Welcome back, {{ current_user.full_name }}
+    </h1>
+
+    <p style="
+        font-size:14px;
+        color:#cbd5e1;
+        margin-bottom:18px;
+        max-width:520px;">
+        Manage attendance, leave approvals, payslips, employee records, and internal updates from one modern control center.
+    </p>
+
+    <div class="hero-actions">
+
+      {% if current_user.role in ['employee', 'manager'] %}
+      <a href="{{ url_for('apply_leave') }}" class="btn btn-primary btn-md">
+        <i class="bi bi-send-check me-2"></i>Apply Leave
+      </a>
+      {% endif %}
+
+      <a href="{{ url_for('attendance_view') }}" class="btn btn-light btn-md">
+        <i class="bi bi-calendar2-week me-2"></i>View Attendance
+      </a>
+
+      {% if current_user.role in ['manager', 'hr', 'admin'] %}
+      <a href="{{ url_for('team') }}" class="btn btn-outline-light btn-md">
+        <i class="bi bi-people me-2"></i>Open Team
+      </a>
+      {% endif %}
+
+    </div>
+
+  </div>
+
+
+  <div class="hero-side">
+
+    <div class="hero-mini-card">
+      <span class="mini-label">Role</span>
+      <strong style="font-size:18px;">
+        {{ current_user.role|capitalize }}
+      </strong>
+    </div>
+
+    <div class="hero-mini-card">
+      <span class="mini-label">Notifications</span>
+      <strong style="font-size:20px;">
+        {{ counts.unread_notifications }}
+      </strong>
+    </div>
+
+    <div class="hero-mini-card">
+      <span class="mini-label">Leave Balance</span>
+      <strong style="font-size:20px;">
+        {{ counts.my_balance }}
+      </strong>
+    </div>
+
+  </div>
+
+</section>
+
+
+
+<section class="stats-grid">
+
+  <div class="metric-card accent-primary">
+    <div class="metric-label">My Leave Requests</div>
+    <div class="metric-value">{{ counts.my_leave_count }}</div>
+    <div class="metric-foot">Submitted applications</div>
+  </div>
+
+
+  <div class="metric-card accent-warning">
+    <div class="metric-label">Pending Requests</div>
+    <div class="metric-value">{{ counts.my_pending_count }}</div>
+    <div class="metric-foot">Awaiting approval</div>
+  </div>
+
+
+  <div class="metric-card accent-success">
+    <div class="metric-label">Leave Balance</div>
+    <div class="metric-value">{{ counts.my_balance }}</div>
+    <div class="metric-foot">Available days</div>
+  </div>
+
+
+  <div class="metric-card accent-danger">
+    <div class="metric-label">Unread Notifications</div>
+    <div class="metric-value">{{ counts.unread_notifications }}</div>
+    <div class="metric-foot">System updates</div>
+  </div>
+
+
   {% if current_user.role == 'manager' %}
-  <div class="col-md-6"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Team Members</div><div class="display-6 fw-bold">{{ counts.team_members }}</div></div></div></div>
-  <div class="col-md-6"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Pending for Approval</div><div class="display-6 fw-bold">{{ counts.manager_pending }}</div></div></div></div>
+
+  <div class="metric-card">
+    <div class="metric-label">Team Members</div>
+    <div class="metric-value">{{ counts.team_members }}</div>
+    <div class="metric-foot">Direct reports</div>
+  </div>
+
+
+  <div class="metric-card accent-info">
+    <div class="metric-label">Pending Approvals</div>
+    <div class="metric-value">{{ counts.pending_for_me }}</div>
+    <div class="metric-foot">Needs review</div>
+  </div>
+
   {% endif %}
-  {% if current_user.role in ['hr', 'admin'] %}
-  <div class="col-md-4"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Total Employees</div><div class="display-6 fw-bold">{{ counts.total_employees }}</div></div></div></div>
-  <div class="col-md-4"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Pending HR Reviews</div><div class="display-6 fw-bold">{{ counts.hr_pending }}</div></div></div></div>
-  <div class="col-md-4"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Documents</div><div class="display-6 fw-bold">{{ counts.documents_total }}</div></div></div></div>
+
+
+  {% if current_user.role in ['hr','admin'] %}
+
+  <div class="metric-card">
+    <div class="metric-label">Total Employees</div>
+    <div class="metric-value">{{ counts.total_employees }}</div>
+  </div>
+
+
+  <div class="metric-card">
+    <div class="metric-label">Pending Approvals</div>
+    <div class="metric-value">{{ counts.pending_for_me }}</div>
+  </div>
+
+
+  <div class="metric-card">
+    <div class="metric-label">Documents</div>
+    <div class="metric-value">{{ counts.documents_total }}</div>
+  </div>
+
   {% endif %}
+
+
   {% if current_user.role == 'admin' %}
-  <div class="col-md-12"><div class="card card-stat"><div class="card-body"><div class="text-secondary">Queued Emails</div><div class="display-6 fw-bold">{{ counts.queued_emails }}</div></div></div></div>
+
+  <div class="metric-card accent-dark">
+    <div class="metric-label">Queued Emails</div>
+    <div class="metric-value">{{ counts.queued_emails }}</div>
+  </div>
+
   {% endif %}
-</div>
-<div class="row g-4">
-  <div class="col-lg-8">
-    <div class="card border-0 shadow-sm rounded-4 mb-4"><div class="card-body">
-      <h5 class="mb-3">Recent Leave Activity</h5>
-      <div class="table-responsive"><table class="table align-middle"><thead><tr>{% if current_user.role != 'employee' %}<th>Employee</th>{% endif %}<th>Application No</th><th>Leave Type</th><th>From</th><th>To</th><th>Status</th><th></th></tr></thead><tbody>
-        {% for row in recent_leaves %}<tr>{% if current_user.role != 'employee' %}<td>{{ row.full_name }}</td>{% endif %}<td>{{ row.application_no }}</td><td>{{ row.leave_type_name }}</td><td>{{ row.from_date }}</td><td>{{ row.to_date }}</td><td><span class="badge text-bg-light border">{{ row.status }}</span></td><td><a href="{{ url_for('leave_detail', leave_id=row.id) }}" class="btn btn-sm btn-outline-primary">Open</a></td></tr>{% else %}<tr><td colspan="7" class="text-center text-secondary py-4">No records found.</td></tr>{% endfor %}
-      </tbody></table></div>
-    </div></div>
-    <div class="card border-0 shadow-sm rounded-4"><div class="card-body">
-      <h5 class="mb-3">Recent Notifications</h5>
-      {% for row in recent_notifications %}
-      <div class="border rounded-3 p-3 mb-2 {% if not row.is_read %}border-primary{% endif %}">
-        <div class="d-flex justify-content-between gap-3">
-          <div>
-            <div class="fw-semibold">{{ row.title }}</div>
-            <div class="small text-secondary">{{ row.message }}</div>
-          </div>
-          <div class="text-end small text-secondary">
-            <div>{{ row.created_at }}</div>
-            <a href="{{ url_for('mark_notification_read', notification_id=row.id) }}">Open</a>
-          </div>
-        </div>
-      </div>
-      {% else %}
-      <div class="text-secondary">No notifications.</div>
-      {% endfor %}
-    </div></div>
+
+</section>
+
+
+
+<section class="analytics-grid mt-4">
+
+
+  <div class="analytics-panel">
+
+    <h5 style="font-size:16px;">Performance Snapshot</h5>
+
+    <div class="mini-chart-row">
+      Attendance Completion
+      <strong>
+        {{ (100 - counts.my_pending_count*5) if (100 - counts.my_pending_count*5) > 0 else 0 }}%
+      </strong>
+    </div>
+
+
+    <div class="mini-chart-row">
+      Leave Usage
+      <strong>
+        {{ (100 - counts.my_balance) if (100 - counts.my_balance) > 0 else 0 }}%
+      </strong>
+    </div>
+
+
+    <div class="mini-chart-row">
+      Response Queue
+      <strong>
+        {{ (counts.unread_notifications * 10) if (counts.unread_notifications * 10) < 100 else 100 }}%
+      </strong>
+    </div>
+
   </div>
-  <div class="col-lg-4">
-    <div class="card border-0 shadow-sm rounded-4"><div class="card-body">
-      <h5 class="mb-3">Recent Attendance</h5>
-      {% for row in recent_attendance %}
-      <div class="border rounded-3 p-3 mb-2">
-        <div class="fw-semibold">{{ row.attendance_date }}</div>
-        <div class="small text-secondary">{{ row.status }}{% if row.check_in %} · {{ row.check_in }} to {{ row.check_out }}{% endif %}</div>
-      </div>
-      {% else %}
-      <div class="text-secondary">No attendance records.</div>
-      {% endfor %}
-    </div></div>
+
+
+
+  <div class="analytics-panel">
+
+    <h5 style="font-size:16px;">Quick Access</h5>
+
+    <div class="quick-grid">
+
+      <a class="quick-card" href="{{ url_for('attendance_view') }}">
+        Attendance
+      </a>
+
+      <a class="quick-card" href="{{ url_for('payroll_view') }}">
+        Payslips
+      </a>
+
+      <a class="quick-card" href="{{ url_for('notifications_view') }}">
+        Alerts
+      </a>
+
+      <a class="quick-card" href="{{ url_for('profile') }}">
+        Profile
+      </a>
+
+    </div>
+
   </div>
-</div>
+
+
+</section>
+
+
+
 {% endblock %}

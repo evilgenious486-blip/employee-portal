@@ -16,8 +16,18 @@
           <div class="col-md-4"><strong>To:</strong><br>{{ leave.to_date }}</div>
           <div class="col-md-4"><strong>Total Days:</strong><br>{{ leave.total_days }}</div>
           <div class="col-12"><strong>Reason:</strong><br>{{ leave.reason }}</div>
-          <div class="col-md-6"><strong>Manager Status:</strong><br>{{ leave.manager_status }}</div>
-          <div class="col-md-6"><strong>HR Status:</strong><br>{{ leave.hr_status }}</div>
+          <div class="col-md-6"><strong>Department:</strong><br>{{ leave.department_name or '-' }}</div>
+          <div class="col-md-6"><strong>Designation:</strong><br>{{ leave.designation_name or '-' }}</div>
+          <div class="col-12">
+            <strong>Approval Route:</strong><br>
+            <div class="mt-2 d-flex flex-wrap gap-2">
+              {% for step in approval_steps %}
+                <span class="badge text-bg-light border">{{ step.step_no }}. {{ step.approver_title }}{% if step.full_name %} - {{ step.full_name }}{% endif %} ({{ step.status }})</span>
+              {% else %}
+                <span class="text-secondary">No approval route found.</span>
+              {% endfor %}
+            </div>
+          </div>
           <div class="col-12">
             <strong>Attachment:</strong><br>
             {% if leave.attachment %}
@@ -30,32 +40,16 @@
       </div>
     </div>
 
-    {% if current_user.role == 'manager' and leave.manager_status == 'Pending' %}
+        {% if can_action %}
     <div class="card border-0 shadow-sm rounded-4 mt-4">
       <div class="card-body">
-        <h5 class="mb-3">Manager Action</h5>
+        <h5 class="mb-3">{{ current_action_label }} Action</h5>
         <form method="post">
           <div class="mb-3">
             <label class="form-label">Remarks</label>
             <textarea class="form-control" name="remarks" rows="3"></textarea>
           </div>
           <button name="action" value="approve" class="btn btn-success">Approve</button>
-          <button name="action" value="reject" class="btn btn-danger">Reject</button>
-        </form>
-      </div>
-    </div>
-    {% endif %}
-
-    {% if current_user.role in ['hr', 'admin'] and leave.manager_status == 'Approved' and leave.hr_status == 'Pending' %}
-    <div class="card border-0 shadow-sm rounded-4 mt-4">
-      <div class="card-body">
-        <h5 class="mb-3">HR Final Action</h5>
-        <form method="post">
-          <div class="mb-3">
-            <label class="form-label">Remarks</label>
-            <textarea class="form-control" name="remarks" rows="3"></textarea>
-          </div>
-          <button name="action" value="approve" class="btn btn-success">Final Approve</button>
           <button name="action" value="reject" class="btn btn-danger">Reject</button>
         </form>
       </div>
