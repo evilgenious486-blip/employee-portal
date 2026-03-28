@@ -7,7 +7,7 @@
 
     <div class="col-lg-6 d-none d-lg-flex flex-column justify-content-center p-5 text-white" style="background:linear-gradient(180deg,#162844 0%,#243b63 100%);">
       <div class="mb-4">
-        <img src="{{ url_for('static', filename='logo.png') }}" alt="Pacost Logo" style="max-width:180px; height:auto; background:#fff; padding:10px; border-radius:12px;">
+        <img src="{{ url_for('static', filename='images/pacost_logo.png') }}" alt="Pacost Logo" style="max-width:180px; height:auto; background:#fff; padding:10px; border-radius:12px;">
       </div>
 
       <div style="font-size:12px; letter-spacing:2px; opacity:.8; margin-bottom:14px;">
@@ -15,18 +15,12 @@
       </div>
 
       <h1 style="font-size:40px; line-height:1.15; font-weight:800; margin-bottom:18px;">
-        Smart access for HR, managers, and employees.
+        Employee Login Portal
       </h1>
 
       <p style="font-size:16px; line-height:1.7; opacity:.9; max-width:470px; margin-bottom:28px;">
-        Track leave, attendance, payroll, documents, and approvals from one clean and practical portal.
+        Secure access for employees, managers, and HR.
       </p>
-
-      <div style="font-size:16px; line-height:2;">
-        <div>✓ Role based secure access</div>
-        <div>✓ Attendance, payroll, and document workflows</div>
-        <div>✓ Works on web and mobile app</div>
-      </div>
     </div>
 
     <div class="col-lg-6 d-flex align-items-center">
@@ -55,7 +49,10 @@
           </div>
         {% endif %}
 
-        <form method="POST" action="{{ url_for('login') }}">
+        <form method="POST" action="{{ url_for('login') }}" autocomplete="off">
+          <input type="text" style="display:none">
+          <input type="password" style="display:none">
+
           <div class="mb-3">
             <label for="identifier" class="form-label" style="font-size:15px; font-weight:600; color:#374151;">
               Email or Employee Code
@@ -65,8 +62,10 @@
               class="form-control form-control-lg"
               id="identifier"
               name="identifier"
-              value="{{ request.form.get('identifier', '') }}"
-              placeholder="e.g. waseem@pacost.com or PAC-249"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
               required
               style="height:58px; font-size:16px; border-radius:12px;"
             >
@@ -82,13 +81,14 @@
               id="password"
               name="password"
               placeholder="Enter password"
+              autocomplete="new-password"
               required
               style="height:58px; font-size:16px; border-radius:12px;"
             >
           </div>
 
           <div class="d-flex justify-content-end mb-4">
-            <a href="#" style="font-size:14px; text-decoration:none;">Forgot password?</a>
+            <a href="{{ url_for('forgot_password') }}" style="font-size:14px; text-decoration:none;">Forgot password?</a>
           </div>
 
           <button
