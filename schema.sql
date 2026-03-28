@@ -6,12 +6,12 @@ DROP TABLE IF EXISTS attendance;
 DROP TABLE IF EXISTS holiday_calendar;
 DROP TABLE IF EXISTS company_settings;
 DROP TABLE IF EXISTS leave_history;
+DROP TABLE IF EXISTS leave_approval_steps;
 DROP TABLE IF EXISTS leave_applications;
 DROP TABLE IF EXISTS leave_balances;
 DROP TABLE IF EXISTS leave_types;
 DROP TABLE IF EXISTS employee_documents;
 DROP TABLE IF EXISTS users;
-DROP TABLE IF EXISTS projects;
 DROP TABLE IF EXISTS departments;
 DROP TABLE IF EXISTS designations;
 
@@ -25,30 +25,16 @@ CREATE TABLE designations (
     name TEXT NOT NULL UNIQUE
 );
 
-CREATE TABLE projects (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_code TEXT NOT NULL UNIQUE,
-    project_name TEXT NOT NULL,
-    location TEXT,
-    client_name TEXT,
-    status TEXT NOT NULL DEFAULT 'Active',
-    start_date TEXT,
-    end_date TEXT,
-    created_by INTEGER,
-    created_at TEXT NOT NULL
-);
-
 CREATE TABLE users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     full_name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     employee_code TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
-    role TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('employee', 'manager', 'hr', 'admin')),
     department_id INTEGER,
     designation_id INTEGER,
     manager_id INTEGER,
-    project_id INTEGER,
     phone TEXT,
     address TEXT,
     emergency_contact TEXT,
@@ -58,11 +44,9 @@ CREATE TABLE users (
     deduction_per_absent REAL NOT NULL DEFAULT 0,
     deduction_per_late REAL NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 1,
-    avatar_filename TEXT,
     FOREIGN KEY (department_id) REFERENCES departments (id),
     FOREIGN KEY (designation_id) REFERENCES designations (id),
-    FOREIGN KEY (manager_id) REFERENCES users (id),
-    FOREIGN KEY (project_id) REFERENCES projects (id)
+    FOREIGN KEY (manager_id) REFERENCES users (id)
 );
 
 CREATE TABLE leave_types (
@@ -100,6 +84,19 @@ CREATE TABLE leave_applications (
     created_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users (id),
     FOREIGN KEY (leave_type_id) REFERENCES leave_types (id)
+);
+
+CREATE TABLE leave_approval_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    leave_application_id INTEGER NOT NULL,
+    step_no INTEGER NOT NULL,
+    approver_user_id INTEGER NOT NULL,
+    approver_title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Waiting',
+    remarks TEXT,
+    action_at TEXT,
+    FOREIGN KEY (leave_application_id) REFERENCES leave_applications (id),
+    FOREIGN KEY (approver_user_id) REFERENCES users (id)
 );
 
 CREATE TABLE leave_history (

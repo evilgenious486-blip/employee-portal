@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h3 class="mb-0">{{ 'Edit Payslip' if slip else 'Add Payslip' }}</h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('payroll_view') }}">Back</a>
+</div>
+<div class="card border-0 shadow-sm rounded-4"><div class="card-body">
+  <form method="post" class="row g-3">
+    <div class="col-md-6"><label class="form-label">Employee</label><select class="form-select" name="user_id" required>{% for emp in employees %}<option value="{{ emp.id }}" {% if slip and emp.id == slip.user_id %}selected{% endif %}>{{ emp.full_name }}</option>{% endfor %}</select></div>
+    <div class="col-md-6"><label class="form-label">Month</label><input class="form-control" name="month_label" placeholder="Feb 2026" value="{{ slip.month_label if slip else '' }}" required></div>
+    <div class="col-md-4"><label class="form-label">Basic Salary</label><input type="number" step="0.01" class="form-control" name="basic_salary" value="{{ slip.basic_salary if slip else '' }}" required></div>
+    <div class="col-md-4"><label class="form-label">Allowances</label><input type="number" step="0.01" class="form-control" name="allowances" value="{{ slip.allowances if slip else '0' }}" required></div>
+    <div class="col-md-4"><label class="form-label">Deductions</label><input type="number" step="0.01" class="form-control" name="deductions" value="{{ slip.deductions if slip else '0' }}" required></div>
+    <div class="col-12"><button class="btn btn-primary">Save Payslip</button></div>
+  </form>
+</div></div>
+{% endblock %}

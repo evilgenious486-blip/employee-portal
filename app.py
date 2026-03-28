@@ -26,96 +26,6 @@ app.config["SECRET_KEY"] = "change-this-secret-key"
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 
-ADMIN_ROLES = {"admin", "super_admin"}
-HR_ROLES = {"hr"}
-PROJECT_LEAD_ROLES = {"manager", "project_manager", "site_manager", "engineer"}
-TEAM_ACCESS_ROLES = ADMIN_ROLES | HR_ROLES | PROJECT_LEAD_ROLES
-
-
-def is_admin_role(role: str | None) -> bool:
-    return role in ADMIN_ROLES
-
-
-def is_hr_role(role: str | None) -> bool:
-    return role in HR_ROLES
-
-
-def is_project_scoped_role(role: str | None) -> bool:
-    return role in PROJECT_LEAD_ROLES
-
-
-def can_manage_people(role: str | None) -> bool:
-    return role in TEAM_ACCESS_ROLES
-
-
-def role_label(role: str | None) -> str:
-    labels = {
-        "admin": "Super Admin",
-        "super_admin": "Super Admin",
-        "manager": "Manager",
-        "project_manager": "Project Manager",
-        "site_manager": "Site Manager",
-        "engineer": "Engineer",
-        "employee": "Employee",
-        "hr": "HR",
-    }
-    return labels.get(role or "", (role or "").replace("_", " ").title())
-
-
-def visible_user_filter(user: sqlite3.Row, alias: str = "u") -> tuple[str, list[Any]]:
-    role = user["role"]
-    if is_admin_role(role) or is_hr_role(role):
-        return "1=1", []
-    if is_project_scoped_role(role):
-        project_id = user["project_id"]
-        if project_id:
-            return f"{alias}.project_id = ?", [project_id]
-        return "0=1", []
-    return f"{alias}.id = ?", [user["id"]]
-
-
-def visible_project_filter(user: sqlite3.Row, alias: str = "p") -> tuple[str, list[Any]]:
-    role = user["role"]
-    if is_admin_role(role) or is_hr_role(role):
-        return "1=1", []
-    if user["project_id"]:
-        return f"{alias}.id = ?", [user["project_id"]]
-    return "0=1", []
-
-
-def user_can_view_employee(viewer: sqlite3.Row, employee: sqlite3.Row) -> bool:
-    if viewer["id"] == employee["id"]:
-        return True
-    if is_admin_role(viewer["role"]) or is_hr_role(viewer["role"]):
-        return True
-    if is_project_scoped_role(viewer["role"]) and viewer["project_id"] and viewer["project_id"] == employee["project_id"]:
-        return True
-    return False
-
-
-def project_choice_rows(db: sqlite3.Connection, user: sqlite3.Row | None = None):
-    query = "SELECT * FROM projects"
-    params: tuple[Any, ...] = ()
-    if user is not None:
-        cond, cond_params = visible_project_filter(user, "projects")
-        if cond != "1=1":
-            query += f" WHERE {cond}"
-            params = tuple(cond_params)
-    query += " ORDER BY project_name"
-    return db.execute(query, params).fetchall()
-
-
-def team_user_rows(db: sqlite3.Connection, viewer: sqlite3.Row):
-    cond, params = visible_user_filter(viewer, "u")
-    query = """
-        SELECT u.*, d.name AS department_name, ds.name AS designation_name, p.project_name, p.project_code
-        FROM users u
-        LEFT JOIN departments d ON u.department_id=d.id
-        LEFT JOIN designations ds ON u.designation_id=ds.id
-        LEFT JOIN projects p ON u.project_id=p.id
-        WHERE u.is_active=1 AND """ + cond + " ORDER BY u.full_name"
-    return db.execute(query, tuple(params)).fetchall()
-
 
 def now_str() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -135,57 +45,24 @@ def calculate_hours(check_in: str | None, check_out: str | None) -> float:
 
 
 def ensure_schema(db: sqlite3.Connection) -> None:
-    db.execute("""CREATE TABLE IF NOT EXISTS projects (
+    db.execute("""CREATE TABLE IF NOT EXISTS leave_approval_steps (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        project_code TEXT NOT NULL UNIQUE,
-        project_name TEXT NOT NULL,
-        location TEXT,
-        client_name TEXT,
-        status TEXT NOT NULL DEFAULT 'Active',
-        start_date TEXT,
-        end_date TEXT,
-        created_by INTEGER,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (created_by) REFERENCES users (id)
+        leave_application_id INTEGER NOT NULL,
+        step_no INTEGER NOT NULL,
+        approver_user_id INTEGER NOT NULL,
+        approver_title TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Waiting',
+        remarks TEXT,
+        action_at TEXT,
+        FOREIGN KEY (leave_application_id) REFERENCES leave_applications (id),
+        FOREIGN KEY (approver_user_id) REFERENCES users (id)
     )""")
-    users_sql_row = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
-    users_sql = users_sql_row[0] if users_sql_row else ''
-    if users_sql and "CHECK(role IN ('employee', 'manager', 'hr', 'admin'))" in users_sql:
-        db.executescript("""
-            PRAGMA foreign_keys=OFF;
-            CREATE TABLE users_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                full_name TEXT NOT NULL,
-                email TEXT NOT NULL UNIQUE,
-                employee_code TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL,
-                department_id INTEGER,
-                designation_id INTEGER,
-                manager_id INTEGER,
-                project_id INTEGER,
-                phone TEXT,
-                address TEXT,
-                emergency_contact TEXT,
-                join_date TEXT,
-                monthly_basic REAL NOT NULL DEFAULT 0,
-                default_allowances REAL NOT NULL DEFAULT 0,
-                deduction_per_absent REAL NOT NULL DEFAULT 0,
-                deduction_per_late REAL NOT NULL DEFAULT 0,
-                is_active INTEGER NOT NULL DEFAULT 1,
-                avatar_filename TEXT,
-                FOREIGN KEY (department_id) REFERENCES departments (id),
-                FOREIGN KEY (designation_id) REFERENCES designations (id),
-                FOREIGN KEY (manager_id) REFERENCES users_new (id),
-                FOREIGN KEY (project_id) REFERENCES projects (id)
-            );
-            INSERT INTO users_new(id, full_name, email, employee_code, password_hash, role, department_id, designation_id, manager_id, project_id, phone, address, emergency_contact, join_date, monthly_basic, default_allowances, deduction_per_absent, deduction_per_late, is_active, avatar_filename)
-            SELECT id, full_name, email, employee_code, password_hash, role, department_id, designation_id, manager_id, project_id, phone, address, emergency_contact, join_date, COALESCE(monthly_basic,0), COALESCE(default_allowances,0), COALESCE(deduction_per_absent,0), COALESCE(deduction_per_late,0), COALESCE(is_active,1), avatar_filename
-            FROM users;
-            DROP TABLE users;
-            ALTER TABLE users_new RENAME TO users;
-            PRAGMA foreign_keys=ON;
-        """)
+    default_departments = ["Electrical", "Civil", "Mechanical", "QA/QC", "HSE", "Planning", "Procurement", "Testing & Commissioning", "Protection / SCADA", "Project Management", "HR", "Administration"]
+    default_designations = ["Worker", "Technician", "Helper", "Supervisor", "Foreman", "Department Engineer", "Safety Officer", "Safety Engineer", "HSE Engineer", "Site Manager", "Project Engineer", "Project Manager", "HR Officer"]
+    for dept in default_departments:
+        db.execute("INSERT OR IGNORE INTO departments(name) VALUES (?)", (dept,))
+    for desig in default_designations:
+        db.execute("INSERT OR IGNORE INTO designations(name) VALUES (?)", (desig,))
     user_cols = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
     if "monthly_basic" not in user_cols:
         db.execute("ALTER TABLE users ADD COLUMN monthly_basic REAL NOT NULL DEFAULT 0")
@@ -195,10 +72,6 @@ def ensure_schema(db: sqlite3.Connection) -> None:
         user_cols = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
     if "avatar_filename" not in user_cols:
         db.execute("ALTER TABLE users ADD COLUMN avatar_filename TEXT")
-        user_cols = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
-    if "project_id" not in user_cols:
-        db.execute("ALTER TABLE users ADD COLUMN project_id INTEGER")
-        user_cols = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
     attendance_cols = {row[1] for row in db.execute("PRAGMA table_info(attendance)").fetchall()}
     if "ot_hours" not in attendance_cols:
         db.execute("ALTER TABLE attendance ADD COLUMN ot_hours REAL NOT NULL DEFAULT 0")
@@ -209,20 +82,169 @@ def ensure_schema(db: sqlite3.Connection) -> None:
         holiday_type TEXT NOT NULL DEFAULT 'Holiday',
         created_at TEXT NOT NULL
     )""")
-    default_project = db.execute("SELECT id FROM projects ORDER BY id LIMIT 1").fetchone()
-    if not default_project:
-        db.execute(
-            "INSERT INTO projects(project_code, project_name, location, client_name, status, start_date, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("PRJ-001", "Head Office / Shared Resources", "Dammam", "Pacost", "Active", date.today().isoformat(), None, now_str()),
-        )
-        default_project = db.execute("SELECT id FROM projects ORDER BY id LIMIT 1").fetchone()
-    if default_project:
-        db.execute("UPDATE users SET project_id=? WHERE project_id IS NULL", (default_project["id"],))
     db.commit()
 
 
 def get_role_options() -> list[str]:
-    return ["employee", "engineer", "site_manager", "project_manager", "hr", "super_admin"]
+    return ["employee", "manager", "hr", "admin"]
+
+
+def normalize_name(value: str | None) -> str:
+    return (value or "").strip().lower()
+
+
+def designation_name_by_id(db: sqlite3.Connection, designation_id: int | None) -> str:
+    if not designation_id:
+        return ""
+    row = db.execute("SELECT name FROM designations WHERE id=?", (designation_id,)).fetchone()
+    return row["name"] if row else ""
+
+
+def find_approver_by_designation(db: sqlite3.Connection, designation_names: list[str], department_id: int | None = None, exclude_user_id: int | None = None) -> sqlite3.Row | None:
+    for designation_name in designation_names:
+        params: list[Any] = [designation_name]
+        query = """
+            SELECT u.id, u.full_name, ds.name AS designation_name, d.name AS department_name
+            FROM users u
+            JOIN designations ds ON u.designation_id = ds.id
+            LEFT JOIN departments d ON u.department_id = d.id
+            WHERE lower(ds.name)=lower(?) AND u.is_active=1
+        """
+        if department_id is not None:
+            query += " AND u.department_id=?"
+            params.append(department_id)
+        if exclude_user_id is not None:
+            query += " AND u.id<>?"
+            params.append(exclude_user_id)
+        query += " ORDER BY u.id LIMIT 1"
+        row = db.execute(query, tuple(params)).fetchone()
+        if row:
+            return row
+    return None
+
+
+def find_hr_approver(db: sqlite3.Connection, exclude_user_id: int | None = None) -> sqlite3.Row | None:
+    query = """
+        SELECT u.id, u.full_name, COALESCE(ds.name, 'HR') AS designation_name, d.name AS department_name
+        FROM users u
+        LEFT JOIN designations ds ON u.designation_id = ds.id
+        LEFT JOIN departments d ON u.department_id = d.id
+        WHERE u.role='hr' AND u.is_active=1
+    """
+    params: list[Any] = []
+    if exclude_user_id is not None:
+        query += " AND u.id<>?"
+        params.append(exclude_user_id)
+    query += " ORDER BY u.id LIMIT 1"
+    return db.execute(query, tuple(params)).fetchone()
+
+
+def build_leave_route(applicant: sqlite3.Row) -> list[dict[str, Any]]:
+    db = get_db()
+    designation = normalize_name(applicant["designation_name"] if "designation_name" in applicant.keys() else designation_name_by_id(db, applicant["designation_id"]))
+    department_id = applicant["department_id"]
+    route: list[dict[str, Any]] = []
+
+    def add_step(approver: sqlite3.Row | None, fallback_title: str) -> None:
+        if not approver:
+            return
+        if approver["id"] == applicant["id"]:
+            return
+        if any(step["approver_user_id"] == approver["id"] for step in route):
+            return
+        route.append({
+            "approver_user_id": approver["id"],
+            "approver_title": approver["designation_name"] or fallback_title,
+        })
+
+    supervisor = find_approver_by_designation(db, ["Supervisor", "Foreman"], department_id, applicant["id"])
+    dept_engineer = find_approver_by_designation(db, ["Department Engineer"], department_id, applicant["id"])
+    site_manager = find_approver_by_designation(db, ["Site Manager"], None, applicant["id"])
+    project_engineer = find_approver_by_designation(db, ["Project Engineer"], None, applicant["id"])
+    project_manager = find_approver_by_designation(db, ["Project Manager"], None, applicant["id"])
+    hr_user = find_hr_approver(db, applicant["id"])
+
+    if any(term in designation for term in ["worker", "technician", "helper"]):
+        add_step(supervisor, "Supervisor")
+        add_step(dept_engineer, "Department Engineer")
+        add_step(site_manager, "Site Manager")
+        add_step(project_engineer, "Project Engineer")
+        add_step(project_manager, "Project Manager")
+        add_step(hr_user, "HR")
+    elif any(term in designation for term in ["supervisor", "foreman"]):
+        add_step(dept_engineer, "Department Engineer")
+        add_step(site_manager, "Site Manager")
+        add_step(project_engineer, "Project Engineer")
+        add_step(project_manager, "Project Manager")
+        add_step(hr_user, "HR")
+    elif designation == "department engineer" or ("engineer" in designation and not any(term in designation for term in ["project engineer", "safety engineer", "hse engineer"])):
+        add_step(site_manager, "Site Manager")
+        add_step(project_engineer, "Project Engineer")
+        add_step(project_manager, "Project Manager")
+        add_step(hr_user, "HR")
+    elif any(term in designation for term in ["safety officer", "safety engineer", "hse engineer"]):
+        add_step(site_manager, "Site Manager")
+        add_step(project_engineer, "Project Engineer")
+        add_step(project_manager, "Project Manager")
+        add_step(hr_user, "HR")
+    elif designation == "site manager":
+        add_step(project_engineer, "Project Engineer")
+        add_step(project_manager, "Project Manager")
+        add_step(hr_user, "HR")
+    elif designation == "project engineer":
+        add_step(project_manager, "Project Manager")
+        add_step(hr_user, "HR")
+    elif designation == "project manager":
+        add_step(hr_user, "HR")
+    elif applicant["role"] == "hr":
+        add_step(hr_user, "HR")
+    else:
+        if applicant["manager_id"]:
+            mgr = db.execute("""
+                SELECT u.id, u.full_name, COALESCE(ds.name, 'Manager') AS designation_name, d.name AS department_name
+                FROM users u
+                LEFT JOIN designations ds ON u.designation_id=ds.id
+                LEFT JOIN departments d ON u.department_id=d.id
+                WHERE u.id=? AND u.is_active=1
+            """, (applicant["manager_id"],)).fetchone()
+            add_step(mgr, "Manager")
+        add_step(project_manager or site_manager or project_engineer, "Manager")
+        add_step(hr_user, "HR")
+    return route
+
+
+def create_leave_approval_route(leave_id: int, applicant: sqlite3.Row) -> list[sqlite3.Row]:
+    db = get_db()
+    route = build_leave_route(applicant)
+    if not route:
+        return []
+    for idx, step in enumerate(route, start=1):
+        db.execute(
+            "INSERT INTO leave_approval_steps(leave_application_id, step_no, approver_user_id, approver_title, status) VALUES (?, ?, ?, ?, ?)",
+            (leave_id, idx, step["approver_user_id"], step["approver_title"], "Pending" if idx == 1 else "Waiting"),
+        )
+    return db.execute("SELECT * FROM leave_approval_steps WHERE leave_application_id=? ORDER BY step_no", (leave_id,)).fetchall()
+
+
+def get_pending_leave_step(leave_id: int):
+    return get_db().execute("SELECT * FROM leave_approval_steps WHERE leave_application_id=? AND status='Pending' ORDER BY step_no LIMIT 1", (leave_id,)).fetchone()
+
+
+def refresh_leave_status(leave_id: int) -> None:
+    db = get_db()
+    leave = db.execute("SELECT * FROM leave_applications WHERE id=?", (leave_id,)).fetchone()
+    if not leave:
+        return
+    pending = get_pending_leave_step(leave_id)
+    if pending:
+        approver = db.execute("SELECT full_name FROM users WHERE id=?", (pending["approver_user_id"],)).fetchone()
+        stage_text = approver["full_name"] if approver else pending["approver_title"]
+        db.execute("UPDATE leave_applications SET status=?, current_stage=? WHERE id=?", (f"Pending {pending['approver_title']} Approval", f"pending_step_{pending['step_no']}", leave_id))
+        return
+    approved_count = db.execute("SELECT COUNT(*) AS c FROM leave_approval_steps WHERE leave_application_id=? AND status='Approved'", (leave_id,)).fetchone()["c"]
+    total_count = db.execute("SELECT COUNT(*) AS c FROM leave_approval_steps WHERE leave_application_id=?", (leave_id,)).fetchone()["c"]
+    if total_count and approved_count == total_count:
+        db.execute("UPDATE leave_applications SET status='Final Approved', manager_status='Approved', hr_status='Approved', current_stage='closed' WHERE id=?", (leave_id,))
 
 
 def get_holiday_row(db: sqlite3.Connection, attendance_date: str | None):
@@ -300,13 +322,11 @@ def current_user() -> sqlite3.Row | None:
         return None
     return get_db().execute(
         """
-        SELECT u.*, d.name AS department_name, ds.name AS designation_name, m.full_name AS manager_name,
-               p.project_name, p.project_code
+        SELECT u.*, d.name AS department_name, ds.name AS designation_name, m.full_name AS manager_name
         FROM users u
         LEFT JOIN departments d ON u.department_id = d.id
         LEFT JOIN designations ds ON u.designation_id = ds.id
         LEFT JOIN users m ON u.manager_id = m.id
-        LEFT JOIN projects p ON u.project_id = p.id
         WHERE u.id = ?
         """,
         (user_id,),
@@ -378,22 +398,14 @@ def app_counts(user: sqlite3.Row) -> dict[str, Any]:
     counts["attendance_days"] = db.execute("SELECT COUNT(*) AS c FROM attendance WHERE user_id = ? AND status='Present'", (user["id"],)).fetchone()["c"]
     counts["payslip_count"] = db.execute("SELECT COUNT(*) AS c FROM payroll_slips WHERE user_id = ?", (user["id"],)).fetchone()["c"]
     counts["unread_notifications"] = db.execute("SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND is_read = 0", (user["id"],)).fetchone()["c"]
-    counts["project_name"] = user["project_name"] or "Unassigned"
-    counts["project_total"] = db.execute("SELECT COUNT(*) AS c FROM projects").fetchone()["c"]
-    if is_project_scoped_role(user["role"]):
-        counts["team_members"] = db.execute(
-            "SELECT COUNT(*) AS c FROM users WHERE is_active = 1 AND project_id = ? AND id <> ?",
-            (user["project_id"], user["id"]),
-        ).fetchone()["c"] if user["project_id"] else 0
-        counts["manager_pending"] = db.execute(
-            "SELECT COUNT(*) AS c FROM leave_applications la JOIN users u ON la.user_id = u.id WHERE u.project_id = ? AND la.status LIKE 'Pending%'",
-            (user["project_id"],),
-        ).fetchone()["c"] if user["project_id"] else 0
-    if is_hr_role(user["role"]) or is_admin_role(user["role"]):
+    if user["role"] == "manager":
+        counts["team_members"] = db.execute("SELECT COUNT(*) AS c FROM users WHERE manager_id = ? AND is_active = 1", (user["id"],)).fetchone()["c"]
+    pending_for_me = db.execute("SELECT COUNT(*) AS c FROM leave_approval_steps WHERE approver_user_id=? AND status='Pending'", (user["id"],)).fetchone()["c"]
+    counts["pending_for_me"] = pending_for_me
+    if user["role"] in {"hr", "admin"}:
         counts["total_employees"] = db.execute("SELECT COUNT(*) AS c FROM users WHERE is_active = 1").fetchone()["c"]
-        counts["hr_pending"] = db.execute("SELECT COUNT(*) AS c FROM leave_applications WHERE manager_status='Approved' AND hr_status='Pending'").fetchone()["c"]
         counts["documents_total"] = db.execute("SELECT COUNT(*) AS c FROM employee_documents").fetchone()["c"]
-    if is_admin_role(user["role"]):
+    if user["role"] == "admin":
         counts["queued_emails"] = db.execute("SELECT COUNT(*) AS c FROM email_queue WHERE status = 'Queued'").fetchone()["c"]
     return counts
 
@@ -410,15 +422,7 @@ def inject_globals():
             unread_count = db.execute("SELECT COUNT(*) AS c FROM notifications WHERE user_id=? AND is_read=0", (user["id"],)).fetchone()["c"]
         except sqlite3.OperationalError:
             settings = None
-    return {
-        "current_user": user,
-        "year": date.today().year,
-        "settings": settings,
-        "unread_notification_count": unread_count,
-        "role_label": role_label,
-        "is_admin_role": is_admin_role,
-        "can_manage_people": can_manage_people,
-    }
+    return {"current_user": user, "year": date.today().year, "settings": settings, "unread_notification_count": unread_count}
 
 
 def seed_data() -> None:
@@ -965,17 +969,13 @@ def dashboard():
     counts = app_counts(user)
     if user["role"] == "employee":
         recent_leaves = db.execute("SELECT la.*, lt.name AS leave_type_name FROM leave_applications la JOIN leave_types lt ON la.leave_type_id=lt.id WHERE la.user_id=? ORDER BY la.id DESC LIMIT 5", (user["id"],)).fetchall()
-    elif is_project_scoped_role(user["role"]):
-        recent_leaves = db.execute(
-            "SELECT la.*, lt.name AS leave_type_name, u.full_name FROM leave_applications la JOIN leave_types lt ON la.leave_type_id=lt.id JOIN users u ON la.user_id=u.id WHERE u.project_id=? ORDER BY la.id DESC LIMIT 8",
-            (user["project_id"],),
-        ).fetchall() if user["project_id"] else []
+    elif user["role"] == "manager":
+        recent_leaves = db.execute("SELECT la.*, lt.name AS leave_type_name, u.full_name FROM leave_applications la JOIN leave_types lt ON la.leave_type_id=lt.id JOIN users u ON la.user_id=u.id WHERE u.manager_id=? ORDER BY la.id DESC LIMIT 8", (user["id"],)).fetchall()
     else:
         recent_leaves = db.execute("SELECT la.*, lt.name AS leave_type_name, u.full_name FROM leave_applications la JOIN leave_types lt ON la.leave_type_id=lt.id JOIN users u ON la.user_id=u.id ORDER BY la.id DESC LIMIT 8").fetchall()
     recent_attendance = db.execute("SELECT * FROM attendance WHERE user_id=? ORDER BY attendance_date DESC LIMIT 5", (user["id"],)).fetchall()
     recent_notifications = db.execute("SELECT * FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 5", (user["id"],)).fetchall()
-    project_rows = project_choice_rows(db, user)
-    return render_template("dashboard.html", counts=counts, recent_leaves=recent_leaves, recent_attendance=recent_attendance, recent_notifications=recent_notifications, project_rows=project_rows)
+    return render_template("dashboard.html", counts=counts, recent_leaves=recent_leaves, recent_attendance=recent_attendance, recent_notifications=recent_notifications)
 
 
 @app.route("/profile", methods=["GET", "POST"])
@@ -1044,7 +1044,7 @@ def change_password():
 
 @app.route("/leave/apply", methods=["GET", "POST"])
 @login_required
-@role_required("employee")
+@role_required("employee", "manager", "hr")
 def apply_leave():
     db = get_db()
     user = current_user()
@@ -1054,41 +1054,51 @@ def apply_leave():
         from_date = request.form["from_date"]
         to_date = request.form["to_date"]
         reason = request.form["reason"].strip()
-        start = datetime.strptime(from_date, "%Y-%m-%d").date()
-        end = datetime.strptime(to_date, "%Y-%m-%d").date()
-        total_days = (end - start).days + 1
-        if total_days <= 0:
-            flash("To date must be on or after from date.", "danger")
+        start_date = datetime.strptime(from_date, "%Y-%m-%d").date()
+        end_date = datetime.strptime(to_date, "%Y-%m-%d").date()
+        if end_date < start_date:
+            flash("To date cannot be before from date.", "danger")
             return render_template("apply_leave.html", leave_types=leave_types)
+        total_days = (end_date - start_date).days + 1
+        attachment = request.files.get("attachment")
         attachment_name = None
-        file = request.files.get("attachment")
-        if file and file.filename:
-            if not allowed_file(file.filename):
-                flash("Unsupported file type.", "danger")
+        if attachment and attachment.filename:
+            if not allowed_file(attachment.filename):
+                flash("Attachment file type is not allowed.", "warning")
                 return render_template("apply_leave.html", leave_types=leave_types)
-            attachment_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{secure_filename(file.filename)}"
-            file.save(os.path.join(app.config["UPLOAD_FOLDER"], attachment_name))
+            attachment_name = f"leave_{user['id']}_{secrets.token_hex(8)}_{secure_filename(attachment.filename)}"
+            attachment.save(UPLOAD_FOLDER / attachment_name)
         next_num = db.execute("SELECT COUNT(*) AS c FROM leave_applications").fetchone()["c"] + 1
-        app_no = f"LV-2026-{next_num:04d}"
+        app_no = f"LV-{date.today().year}-{next_num:04d}"
         db.execute(
             "INSERT INTO leave_applications(application_no, user_id, leave_type_id, from_date, to_date, total_days, reason, attachment, status, manager_status, hr_status, current_stage, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (app_no, user["id"], leave_type_id, from_date, to_date, total_days, reason, attachment_name, "Pending Manager Approval", "Pending", "Pending", "manager_review", now_str()),
+            (app_no, user["id"], leave_type_id, from_date, to_date, total_days, reason, attachment_name, "Draft Routing", "Pending", "Pending", "routing", now_str()),
         )
         leave_id = db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
         db.execute("INSERT INTO leave_history(leave_application_id, action, remarks, action_by, action_at) VALUES (?, ?, ?, ?, ?)", (leave_id, "Submitted", "Employee submitted leave request", user["id"], now_str()))
-        if user["manager_id"]:
+        steps = create_leave_approval_route(leave_id, user)
+        if not steps:
+            db.execute("DELETE FROM leave_applications WHERE id=?", (leave_id,))
+            db.execute("DELETE FROM leave_history WHERE leave_application_id=?", (leave_id,))
+            db.commit()
+            flash("No approval route could be created for this employee. Please assign the required approvers first.", "danger")
+            return render_template("apply_leave.html", leave_types=leave_types)
+        refresh_leave_status(leave_id)
+        pending_step = get_pending_leave_step(leave_id)
+        if pending_step:
+            approver = db.execute("SELECT full_name FROM users WHERE id=?", (pending_step["approver_user_id"],)).fetchone()
             notify_user(
-                user["manager_id"],
+                pending_step["approver_user_id"],
                 "New leave request",
-                f"{user['full_name']} submitted leave request {app_no}.",
+                f"{user['full_name']} submitted leave request {app_no} for your approval.",
                 link=url_for("leave_detail", leave_id=leave_id),
-                email_subject=f"Leave request {app_no}",
-                email_body=f"A new leave request from {user['full_name']} requires your review.",
+                email_subject="New leave request awaiting approval",
+                email_body=f"A new leave request from {user['full_name']} is waiting for your action.",
             )
         notify_user(user["id"], "Leave submitted", f"Your leave request {app_no} was submitted successfully.", url_for("my_leaves"))
         log_audit("Leave", "Submitted", f"Leave request {app_no} submitted", user["id"])
         db.commit()
-        flash("Leave application submitted successfully.", "success")
+        flash("Leave request submitted successfully.", "success")
         return redirect(url_for("my_leaves"))
     return render_template("apply_leave.html", leave_types=leave_types)
 
@@ -1096,105 +1106,112 @@ def apply_leave():
 @app.route("/leaves")
 @login_required
 def my_leaves():
-    user = current_user()
     db = get_db()
-    query = "SELECT la.*, lt.name AS leave_type_name, u.full_name FROM leave_applications la JOIN leave_types lt ON la.leave_type_id=lt.id JOIN users u ON la.user_id=u.id"
-    params: tuple[Any, ...] = ()
+    user = current_user()
+    base_query = "SELECT DISTINCT la.*, lt.name AS leave_type_name, u.full_name FROM leave_applications la JOIN leave_types lt ON la.leave_type_id=lt.id JOIN users u ON la.user_id=u.id"
+    params: list[Any] = []
+    conditions: list[str] = []
     if user["role"] == "employee":
-        query += " WHERE la.user_id=?"
-        params = (user["id"],)
-    elif is_project_scoped_role(user["role"]):
-        query += " WHERE u.project_id=?"
-        params = (user["project_id"],)
-    query += " ORDER BY la.id DESC"
-    leaves = db.execute(query, params).fetchall()
+        conditions.append("la.user_id=?")
+        params.append(user["id"])
+    elif user["role"] == "manager":
+        conditions.append("(la.user_id=? OR EXISTS (SELECT 1 FROM leave_approval_steps s WHERE s.leave_application_id=la.id AND s.approver_user_id=?))")
+        params.extend([user["id"], user["id"]])
+    elif user["role"] == "hr":
+        conditions.append("(la.user_id=? OR EXISTS (SELECT 1 FROM leave_approval_steps s WHERE s.leave_application_id=la.id AND s.approver_user_id=?))")
+        params.extend([user["id"], user["id"]])
+    if conditions:
+        base_query += " WHERE " + " AND ".join(conditions)
+    base_query += " ORDER BY la.id DESC"
+    leaves = db.execute(base_query, params).fetchall()
     return render_template("leaves.html", leaves=leaves)
 
 
 @app.route("/leave/<int:leave_id>", methods=["GET", "POST"])
 @login_required
 def leave_detail(leave_id: int):
-    user = current_user()
     db = get_db()
+    user = current_user()
     leave = db.execute(
-        "SELECT la.*, lt.name AS leave_type_name, u.full_name, u.manager_id FROM leave_applications la JOIN leave_types lt ON la.leave_type_id=lt.id JOIN users u ON la.user_id=u.id WHERE la.id=?",
+        "SELECT la.*, lt.name AS leave_type_name, u.full_name, u.manager_id, u.department_id, d.name AS department_name, ds.name AS designation_name FROM leave_applications la JOIN leave_types lt ON la.leave_type_id=lt.id JOIN users u ON la.user_id=u.id LEFT JOIN departments d ON u.department_id=d.id LEFT JOIN designations ds ON u.designation_id=ds.id WHERE la.id=?",
         (leave_id,),
     ).fetchone()
     if not leave:
         flash("Leave application not found.", "danger")
         return redirect(url_for("my_leaves"))
-    can_view = is_hr_role(user["role"]) or is_admin_role(user["role"]) or leave["user_id"] == user["id"] or (is_project_scoped_role(user["role"]) and user["project_id"] == db.execute("SELECT project_id FROM users WHERE id=?", (leave["user_id"],)).fetchone()["project_id"])
+    pending_step = get_pending_leave_step(leave_id)
+    can_view = user["role"] == "admin" or leave["user_id"] == user["id"] or db.execute("SELECT 1 FROM leave_approval_steps WHERE leave_application_id=? AND approver_user_id=?", (leave_id, user["id"])).fetchone() is not None
     if not can_view:
-        flash("You do not have access to this record.", "danger")
+        flash("You do not have access to this leave request.", "danger")
         return redirect(url_for("my_leaves"))
-    if request.method == "POST":
+    can_action = False
+    current_action_label = None
+    if pending_step and (user["role"] == "admin" or pending_step["approver_user_id"] == user["id"]):
+        can_action = True
+        current_action_label = pending_step["approver_title"]
+    if request.method == "POST" and can_action:
         action = request.form["action"]
-        remarks = request.form.get("remarks", "").strip() or None
-        hist_action = None
-        if user["role"] in {"manager", "project_manager", "site_manager"} and leave["manager_id"] == user["id"] and leave["manager_status"] == "Pending":
-            if action == "approve":
-                db.execute("UPDATE leave_applications SET manager_status='Approved', status='Pending HR Approval', current_stage='hr_review' WHERE id=?", (leave_id,))
-                hist_action = "Manager Approved"
-                hr_user = db.execute("SELECT id FROM users WHERE role='hr' AND is_active=1 ORDER BY id LIMIT 1").fetchone()
-                if hr_user:
-                    notify_user(hr_user["id"], "Leave request pending HR review", f"{leave['application_no']} is ready for HR review.", url_for("leave_detail", leave_id=leave_id))
-                notify_user(leave["user_id"], "Manager approved leave", f"{leave['application_no']} has moved to HR review.", url_for("leave_detail", leave_id=leave_id))
-            elif action == "reject":
-                db.execute("UPDATE leave_applications SET manager_status='Rejected', status='Rejected by Manager', current_stage='closed' WHERE id=?", (leave_id,))
-                hist_action = "Manager Rejected"
-                notify_user(leave["user_id"], "Leave rejected", f"{leave['application_no']} was rejected by your manager.", url_for("leave_detail", leave_id=leave_id))
-        elif user["role"] in {"hr", "admin"} and leave["manager_status"] == "Approved" and leave["hr_status"] == "Pending":
-            if action == "approve":
-                db.execute("UPDATE leave_applications SET hr_status='Approved', status='Final Approved', current_stage='closed' WHERE id=?", (leave_id,))
-                db.execute("UPDATE leave_balances SET used_days=used_days+?, remaining_days=remaining_days-? WHERE user_id=? AND leave_type_id=?", (leave["total_days"], leave["total_days"], leave["user_id"], leave["leave_type_id"]))
-                hist_action = "HR Approved"
-                notify_user(leave["user_id"], "Leave approved", f"{leave['application_no']} was finally approved.", url_for("leave_detail", leave_id=leave_id))
-            elif action == "reject":
-                db.execute("UPDATE leave_applications SET hr_status='Rejected', status='Rejected by HR', current_stage='closed' WHERE id=?", (leave_id,))
-                hist_action = "HR Rejected"
-                notify_user(leave["user_id"], "Leave rejected", f"{leave['application_no']} was rejected by HR.", url_for("leave_detail", leave_id=leave_id))
-        if hist_action:
-            db.execute("INSERT INTO leave_history(leave_application_id, action, remarks, action_by, action_at) VALUES (?, ?, ?, ?, ?)", (leave_id, hist_action, remarks, user["id"], now_str()))
-            log_audit("Leave", hist_action, f"Leave request {leave['application_no']} actioned", leave["user_id"])
-            db.commit()
-            flash("Action saved successfully.", "success")
+        remarks = request.form.get("remarks", "").strip()
+        step = get_pending_leave_step(leave_id)
+        if not step:
+            flash("This leave request has already been actioned.", "warning")
             return redirect(url_for("leave_detail", leave_id=leave_id))
+        hist_action = f"{step['approver_title']} {'Approved' if action == 'approve' else 'Rejected'}"
+        if action == "approve":
+            db.execute("UPDATE leave_approval_steps SET status='Approved', remarks=?, action_at=? WHERE id=?", (remarks, now_str(), step["id"]))
+            next_step = db.execute("SELECT * FROM leave_approval_steps WHERE leave_application_id=? AND step_no>? ORDER BY step_no LIMIT 1", (leave_id, step["step_no"])).fetchone()
+            if next_step:
+                db.execute("UPDATE leave_approval_steps SET status='Pending' WHERE id=?", (next_step["id"],))
+                approver = db.execute("SELECT full_name FROM users WHERE id=?", (next_step["approver_user_id"],)).fetchone()
+                notify_user(next_step["approver_user_id"], "Leave request pending your review", f"{leave['application_no']} is waiting for your approval.", url_for("leave_detail", leave_id=leave_id))
+                refresh_leave_status(leave_id)
+                notify_user(leave["user_id"], f"{step['approver_title']} approved leave", f"{leave['application_no']} moved to the next approval stage.", url_for("leave_detail", leave_id=leave_id))
+            else:
+                db.execute("UPDATE leave_balances SET used_days=used_days+?, remaining_days=remaining_days-? WHERE user_id=? AND leave_type_id=?", (leave["total_days"], leave["total_days"], leave["user_id"], leave["leave_type_id"]))
+                refresh_leave_status(leave_id)
+                notify_user(leave["user_id"], "Leave approved", f"{leave['application_no']} was finally approved.", url_for("leave_detail", leave_id=leave_id))
+        else:
+            db.execute("UPDATE leave_approval_steps SET status='Rejected', remarks=?, action_at=? WHERE id=?", (remarks, now_str(), step["id"]))
+            db.execute("UPDATE leave_approval_steps SET status='Cancelled' WHERE leave_application_id=? AND step_no>? AND status='Waiting'", (leave_id, step["step_no"]))
+            db.execute("UPDATE leave_applications SET status=?, manager_status='Rejected', hr_status='Rejected', current_stage='closed' WHERE id=?", (f"Rejected by {step['approver_title']}", leave_id))
+            notify_user(leave["user_id"], "Leave rejected", f"{leave['application_no']} was rejected by {step['approver_title']}.", url_for("leave_detail", leave_id=leave_id))
+        db.execute("INSERT INTO leave_history(leave_application_id, action, remarks, action_by, action_at) VALUES (?, ?, ?, ?, ?)", (leave_id, hist_action, remarks, user["id"], now_str()))
+        log_audit("Leave", hist_action, f"Leave request {leave['application_no']} actioned", leave["user_id"])
+        db.commit()
+        flash("Leave application updated successfully.", "success")
+        return redirect(url_for("leave_detail", leave_id=leave_id))
     history = db.execute("SELECT lh.*, u.full_name FROM leave_history lh LEFT JOIN users u ON lh.action_by=u.id WHERE lh.leave_application_id=? ORDER BY lh.id ASC", (leave_id,)).fetchall()
-    return render_template("leave_detail.html", leave=leave, history=history)
+    approval_steps = db.execute("SELECT s.*, u.full_name FROM leave_approval_steps s LEFT JOIN users u ON s.approver_user_id=u.id WHERE s.leave_application_id=? ORDER BY s.step_no", (leave_id,)).fetchall()
+    return render_template("leave_detail.html", leave=leave, history=history, approval_steps=approval_steps, can_action=can_action, current_action_label=current_action_label)
+
 
 
 @app.route("/team")
 @login_required
-@role_required("manager", "project_manager", "site_manager", "engineer", "hr", "admin", "super_admin")
 def team():
     user = current_user()
     db = get_db()
-    search = request.args.get("q", "").strip()
-    project_filter = request.args.get("project_id", type=int)
+    search = (request.args.get("q") or "").strip()
     query = """
-        SELECT u.*, d.name AS department_name, ds.name AS designation_name, p.project_name, p.project_code
+        SELECT u.*, d.name AS department_name, ds.name AS designation_name
         FROM users u
-        LEFT JOIN departments d ON u.department_id=d.id
-        LEFT JOIN designations ds ON u.designation_id=ds.id
-        LEFT JOIN projects p ON u.project_id=p.id
+        LEFT JOIN departments d ON u.department_id = d.id
+        LEFT JOIN designations ds ON u.designation_id = ds.id
     """
-    conditions = []
+    conditions: list[str] = []
     params: list[Any] = []
-    visible_condition, visible_params = visible_user_filter(user, "u")
-    conditions.append(visible_condition)
-    params.extend(visible_params)
-    if project_filter:
-        conditions.append("u.project_id = ?")
-        params.append(project_filter)
+    if user["role"] == "manager":
+        conditions.append("u.manager_id = ?")
+        params.append(user["id"])
     if search:
-        conditions.append("(u.full_name LIKE ? OR u.employee_code LIKE ? OR u.email LIKE ? OR ifnull(p.project_name,'') LIKE ?)")
+        conditions.append("(u.full_name LIKE ? OR u.employee_code LIKE ? OR u.email LIKE ?)")
         like = f"%{search}%"
-        params.extend([like, like, like, like])
-    query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY p.project_name, u.full_name"
+        params.extend([like, like, like])
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY u.full_name"
     employees = db.execute(query, tuple(params)).fetchall()
-    projects = project_choice_rows(db, user)
-    return render_template("team.html", employees=employees, search=search, projects=projects, selected_project_id=project_filter)
+    return render_template("team.html", employees=employees, search=search)
 
 
 @app.route("/employees/<int:user_id>")
@@ -1203,13 +1220,13 @@ def employee_detail(user_id: int):
     viewer = current_user()
     db = get_db()
     employee = db.execute(
-        "SELECT u.*, d.name AS department_name, ds.name AS designation_name, m.full_name AS manager_name, p.project_name, p.project_code FROM users u LEFT JOIN departments d ON u.department_id=d.id LEFT JOIN designations ds ON u.designation_id=ds.id LEFT JOIN users m ON u.manager_id=m.id LEFT JOIN projects p ON u.project_id=p.id WHERE u.id=?",
+        "SELECT u.*, d.name AS department_name, ds.name AS designation_name, m.full_name AS manager_name FROM users u LEFT JOIN departments d ON u.department_id=d.id LEFT JOIN designations ds ON u.designation_id=ds.id LEFT JOIN users m ON u.manager_id=m.id WHERE u.id=?",
         (user_id,),
     ).fetchone()
     if not employee:
         flash("Employee not found.", "danger")
         return redirect(url_for("team"))
-    can_view = user_can_view_employee(viewer, employee)
+    can_view = viewer["role"] in {"hr", "admin"} or viewer["id"] == user_id or (viewer["role"] == "manager" and employee["manager_id"] == viewer["id"])
     if not can_view:
         flash("You do not have access to this employee.", "danger")
         return redirect(url_for("dashboard"))
@@ -1220,48 +1237,9 @@ def employee_detail(user_id: int):
     return render_template("employee_detail.html", employee=employee, balances=balances, attendance_rows=attendance_rows, slips=slips, docs=docs)
 
 
-@app.route("/projects", methods=["GET", "POST"])
-@login_required
-@role_required("admin", "super_admin")
-def projects_view():
-    db = get_db()
-    edit_id = request.args.get("edit", type=int)
-    project = None
-    if edit_id:
-        project = db.execute("SELECT * FROM projects WHERE id=?", (edit_id,)).fetchone()
-    if request.method == "POST":
-        project_id = request.form.get("project_id", type=int)
-        project_code = (request.form.get("project_code") or "").strip().upper()
-        project_name = (request.form.get("project_name") or "").strip()
-        location = (request.form.get("location") or "").strip()
-        client_name = (request.form.get("client_name") or "").strip()
-        status = (request.form.get("status") or "Active").strip()
-        start_date = (request.form.get("start_date") or "").strip() or None
-        end_date = (request.form.get("end_date") or "").strip() or None
-        if not project_code or not project_name:
-            flash("Project code and project name are required.", "danger")
-        else:
-            existing = db.execute("SELECT id FROM projects WHERE project_code=? AND id != ?", (project_code, project_id or 0)).fetchone()
-            if existing:
-                flash("Project code already exists.", "danger")
-            else:
-                if project_id:
-                    db.execute("UPDATE projects SET project_code=?, project_name=?, location=?, client_name=?, status=?, start_date=?, end_date=? WHERE id=?", (project_code, project_name, location, client_name, status, start_date, end_date, project_id))
-                    log_audit("Projects", "Updated", f"Updated project {project_code}")
-                    flash("Project updated successfully.", "success")
-                else:
-                    db.execute("INSERT INTO projects(project_code, project_name, location, client_name, status, start_date, end_date, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (project_code, project_name, location, client_name, status, start_date, end_date, session.get("user_id"), now_str()))
-                    log_audit("Projects", "Created", f"Created project {project_code}")
-                    flash("Project created successfully.", "success")
-                db.commit()
-                return redirect(url_for("projects_view"))
-    projects = db.execute("SELECT p.*, COUNT(u.id) AS employee_count FROM projects p LEFT JOIN users u ON u.project_id=p.id AND u.is_active=1 GROUP BY p.id ORDER BY p.project_name").fetchall()
-    return render_template("projects.html", projects=projects, project=project)
-
-
 @app.route("/employees/bulk-upload", methods=["GET", "POST"])
 @login_required
-@role_required("hr", "admin", "super_admin")
+@role_required("hr", "admin")
 def bulk_employee_upload():
     db = get_db()
     if request.method == "POST":
@@ -1330,11 +1308,6 @@ def bulk_employee_upload():
                 if manager_ref:
                     manager = db.execute("SELECT id FROM users WHERE lower(email)=lower(?) OR employee_code=?", (manager_ref, manager_ref)).fetchone()
                     manager_id = manager["id"] if manager else None
-                project_ref = cell(row, "project_code") or cell(row, "project_name")
-                project_id = None
-                if project_ref:
-                    project = db.execute("SELECT id FROM projects WHERE upper(project_code)=upper(?) OR lower(project_name)=lower(?)", (project_ref, project_ref)).fetchone()
-                    project_id = project["id"] if project else None
                 phone = cell(row, "phone")
                 address = cell(row, "address")
                 emergency_contact = cell(row, "emergency_contact")
@@ -1345,8 +1318,8 @@ def bulk_employee_upload():
                 deduction_per_late = float(cell(row, "deduction_per_late", "0") or 0)
                 is_active = 0 if cell(row, "is_active", "1").lower() in {"0", "false", "no", "inactive"} else 1
                 db.execute(
-                    "INSERT INTO users(full_name, email, employee_code, password_hash, role, department_id, designation_id, manager_id, project_id, phone, address, emergency_contact, join_date, monthly_basic, default_allowances, deduction_per_absent, deduction_per_late, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (full_name, email, employee_code, generate_password_hash(password), role, dept_id, desig_id, manager_id, project_id, phone, address, emergency_contact, join_date, monthly_basic, default_allowances, deduction_per_absent, deduction_per_late, is_active),
+                    "INSERT INTO users(full_name, email, employee_code, password_hash, role, department_id, designation_id, manager_id, phone, address, emergency_contact, join_date, monthly_basic, default_allowances, deduction_per_absent, deduction_per_late, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (full_name, email, employee_code, generate_password_hash(password), role, dept_id, desig_id, manager_id, phone, address, emergency_contact, join_date, monthly_basic, default_allowances, deduction_per_absent, deduction_per_late, is_active),
                 )
                 new_id = db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
                 for lt in db.execute("SELECT id, annual_quota FROM leave_types").fetchall():
@@ -1358,31 +1331,29 @@ def bulk_employee_upload():
         except Exception as exc:
             flash(f"Could not process Excel file: {exc}", "danger")
             return redirect(url_for("bulk_employee_upload"))
-    sample_headers = ["full_name", "email", "employee_code", "password", "role", "department", "designation", "manager_email", "project_code", "phone", "address", "emergency_contact", "join_date", "monthly_basic", "default_allowances", "deduction_per_absent", "deduction_per_late", "is_active"]
+    sample_headers = ["full_name", "email", "employee_code", "password", "role", "department", "designation", "manager_email", "phone", "address", "emergency_contact", "join_date", "monthly_basic", "default_allowances", "deduction_per_absent", "deduction_per_late", "is_active"]
     return render_template("employee_bulk_upload.html", sample_headers=sample_headers)
 
 
 @app.route("/employees/new", methods=["GET", "POST"])
 @login_required
-@role_required("hr", "admin", "super_admin")
+@role_required("hr", "admin")
 def new_employee():
     return employee_form_handler()
 
 
 @app.route("/employees/<int:user_id>/edit", methods=["GET", "POST"])
 @login_required
-@role_required("hr", "admin", "super_admin")
+@role_required("hr", "admin")
 def edit_employee(user_id: int):
     return employee_form_handler(user_id)
 
 
 def employee_form_handler(user_id: int | None = None):
     db = get_db()
-    viewer = current_user()
     departments = db.execute("SELECT * FROM departments ORDER BY name").fetchall()
     designations = db.execute("SELECT * FROM designations ORDER BY name").fetchall()
-    managers = db.execute("SELECT id, full_name, role, project_id FROM users WHERE role IN ('manager','project_manager','site_manager') AND is_active=1 ORDER BY full_name").fetchall()
-    projects = project_choice_rows(db)
+    managers = db.execute("SELECT id, full_name FROM users WHERE is_active=1 ORDER BY full_name").fetchall()
     employee = None
     if user_id is not None:
         employee = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -1392,11 +1363,10 @@ def employee_form_handler(user_id: int | None = None):
     if request.method == "POST":
         form = request.form
         manager_id = form.get("manager_id") or None
-        project_id = form.get("project_id") or None
         if user_id is None:
             db.execute(
-                "INSERT INTO users(full_name, email, employee_code, password_hash, role, department_id, designation_id, manager_id, project_id, phone, address, emergency_contact, join_date, monthly_basic, default_allowances, deduction_per_absent, deduction_per_late, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (form["full_name"].strip(), form["email"].strip(), form["employee_code"].strip(), generate_password_hash(form["password"]), form["role"], form["department_id"], form["designation_id"], manager_id, project_id, form["phone"].strip(), form["address"].strip(), form["emergency_contact"].strip(), form["join_date"], float(form.get("monthly_basic") or 0), float(form.get("default_allowances") or 0), float(form.get("deduction_per_absent") or 0), float(form.get("deduction_per_late") or 0), 1 if form.get("is_active", "1") == "1" else 0),
+                "INSERT INTO users(full_name, email, employee_code, password_hash, role, department_id, designation_id, manager_id, phone, address, emergency_contact, join_date, monthly_basic, default_allowances, deduction_per_absent, deduction_per_late, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (form["full_name"].strip(), form["email"].strip(), form["employee_code"].strip(), generate_password_hash(form["password"]), form["role"], form["department_id"], form["designation_id"], manager_id, form["phone"].strip(), form["address"].strip(), form["emergency_contact"].strip(), form["join_date"], float(form.get("monthly_basic") or 0), float(form.get("default_allowances") or 0), float(form.get("deduction_per_absent") or 0), float(form.get("deduction_per_late") or 0), 1 if form.get("is_active", "1") == "1" else 0),
             )
             new_id = db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
             for lt in db.execute("SELECT id, annual_quota FROM leave_types").fetchall():
@@ -1407,30 +1377,33 @@ def employee_form_handler(user_id: int | None = None):
             flash("Employee created successfully.", "success")
             return redirect(url_for("employee_detail", user_id=new_id))
         db.execute(
-            "UPDATE users SET full_name=?, email=?, employee_code=?, role=?, department_id=?, designation_id=?, manager_id=?, project_id=?, phone=?, address=?, emergency_contact=?, join_date=?, monthly_basic=?, default_allowances=?, deduction_per_absent=?, deduction_per_late=?, is_active=? WHERE id=?",
-            (form["full_name"].strip(), form["email"].strip(), form["employee_code"].strip(), form["role"], form["department_id"], form["designation_id"], manager_id, project_id, form["phone"].strip(), form["address"].strip(), form["emergency_contact"].strip(), form["join_date"], float(form.get("monthly_basic") or 0), float(form.get("default_allowances") or 0), float(form.get("deduction_per_absent") or 0), float(form.get("deduction_per_late") or 0), 1 if form.get("is_active", "1") == "1" else 0, user_id),
+            "UPDATE users SET full_name=?, email=?, employee_code=?, role=?, department_id=?, designation_id=?, manager_id=?, phone=?, address=?, emergency_contact=?, join_date=?, monthly_basic=?, default_allowances=?, deduction_per_absent=?, deduction_per_late=?, is_active=? WHERE id=?",
+            (form["full_name"].strip(), form["email"].strip(), form["employee_code"].strip(), form["role"], form["department_id"], form["designation_id"], manager_id, form["phone"].strip(), form["address"].strip(), form["emergency_contact"].strip(), form["join_date"], float(form.get("monthly_basic") or 0), float(form.get("default_allowances") or 0), float(form.get("deduction_per_absent") or 0), float(form.get("deduction_per_late") or 0), 1 if form.get("is_active", "1") == "1" else 0, user_id),
         )
         notify_user(user_id, "Profile updated", "Your employee profile details were updated by HR/Admin.", url_for("employee_detail", user_id=user_id))
         log_audit("Employee", "Updated", f"Updated employee {form['employee_code']}", user_id)
         db.commit()
         flash("Employee updated successfully.", "success")
         return redirect(url_for("employee_detail", user_id=user_id))
-    return render_template("employee_form.html", departments=departments, designations=designations, managers=managers, employee=employee, projects=projects, role_options=get_role_options(), role_label=role_label, viewer=viewer)
+    return render_template("employee_form.html", departments=departments, designations=designations, managers=managers, employee=employee, role_options=get_role_options())
 
 
 @app.route("/employees/<int:user_id>/delete", methods=["POST"])
 @login_required
-@role_required("admin", "super_admin")
+@role_required("admin")
 def delete_employee(user_id: int):
     db = get_db()
     employee = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
     if not employee:
         flash("Employee not found.", "danger")
         return redirect(url_for("team"))
+    if user_id == current_user()["id"]:
+        flash("You cannot deactivate your own account.", "danger")
+        return redirect(url_for("employee_detail", user_id=user_id))
     if employee["role"] == "admin":
         active_admins = db.execute("SELECT COUNT(*) AS c FROM users WHERE role='admin' AND is_active=1").fetchone()["c"]
         if active_admins <= 1:
-            flash("You cannot delete the last active admin.", "danger")
+            flash("You cannot deactivate the last active admin.", "danger")
             return redirect(url_for("employee_detail", user_id=user_id))
     db.execute("UPDATE users SET is_active=0, manager_id=NULL WHERE id=?", (user_id,))
     db.execute("UPDATE users SET manager_id=NULL WHERE manager_id=?", (user_id,))
@@ -1441,9 +1414,44 @@ def delete_employee(user_id: int):
     return redirect(url_for("team"))
 
 
+@app.route("/employees/<int:user_id>/hard-delete", methods=["POST"])
+@login_required
+@role_required("admin")
+def hard_delete_employee(user_id: int):
+    db = get_db()
+    employee = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if not employee:
+        flash("Employee not found.", "danger")
+        return redirect(url_for("team"))
+    if user_id == current_user()["id"]:
+        flash("You cannot delete your own account.", "danger")
+        return redirect(url_for("employee_detail", user_id=user_id))
+    if employee["role"] == "admin":
+        active_admins = db.execute("SELECT COUNT(*) AS c FROM users WHERE role='admin' AND is_active=1").fetchone()["c"]
+        if active_admins <= 1:
+            flash("You cannot delete the last active admin.", "danger")
+            return redirect(url_for("employee_detail", user_id=user_id))
+    db.execute("UPDATE users SET manager_id=NULL WHERE manager_id=?", (user_id,))
+    db.execute("DELETE FROM leave_approval_steps WHERE leave_application_id IN (SELECT id FROM leave_applications WHERE user_id=?) OR approver_user_id=?", (user_id, user_id))
+    db.execute("DELETE FROM leave_history WHERE leave_application_id IN (SELECT id FROM leave_applications WHERE user_id=?) OR action_by=?", (user_id, user_id))
+    db.execute("DELETE FROM leave_applications WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM leave_balances WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM employee_documents WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM attendance WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM payroll_slips WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM notifications WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM email_queue WHERE to_user_id=?", (user_id,))
+    db.execute("DELETE FROM audit_logs WHERE actor_user_id=? OR target_user_id=?", (user_id, user_id))
+    db.execute("DELETE FROM users WHERE id=?", (user_id,))
+    log_audit("Employee", "Deleted", f"Permanently deleted employee {employee['employee_code']}")
+    db.commit()
+    flash("Employee permanently deleted successfully.", "success")
+    return redirect(url_for("team"))
+
+
 @app.route("/employees/<int:user_id>/reset-password", methods=["POST"])
 @login_required
-@role_required("admin", "super_admin", "hr")
+@role_required("admin", "hr")
 def reset_employee_password(user_id: int):
     db = get_db()
     employee = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
@@ -1475,9 +1483,8 @@ def attendance_view():
     month = request.args.get("month") or date.today().strftime("%Y-%m")
     if user["role"] == "employee":
         selected_user_id = user["id"]
-    else:
-        allowed_condition, allowed_params = visible_user_filter(user, "u")
-        allowed = db.execute(f"SELECT COUNT(*) AS c FROM users u WHERE u.id=? AND {allowed_condition}", (selected_user_id, *allowed_params)).fetchone()["c"]
+    elif user["role"] == "manager":
+        allowed = db.execute("SELECT COUNT(*) AS c FROM users WHERE id=? AND manager_id=?", (selected_user_id, user["id"])).fetchone()["c"]
         if selected_user_id != user["id"] and not allowed:
             selected_user_id = user["id"]
     rows = db.execute(
@@ -1485,8 +1492,11 @@ def attendance_view():
         (selected_user_id, month),
     ).fetchall()
     employees = []
-    if can_manage_people(user["role"]):
-        employees = team_user_rows(db, user)
+    if user["role"] in {"manager", "hr", "admin"}:
+        if user["role"] == "manager":
+            employees = db.execute("SELECT id, full_name FROM users WHERE manager_id=? AND is_active=1 ORDER BY full_name", (user["id"],)).fetchall()
+        else:
+            employees = db.execute("SELECT id, full_name FROM users WHERE is_active=1 ORDER BY full_name").fetchall()
     summary = {
         "present": sum(1 for r in rows if r["status"] == "Present"),
         "absent": sum(1 for r in rows if r["status"] == "Absent"),
@@ -1507,13 +1517,17 @@ def payroll_view():
     selected_user_id = request.args.get("user_id", type=int) or user["id"]
     if user["role"] == "employee":
         selected_user_id = user["id"]
-    else:
-        allowed_condition, allowed_params = visible_user_filter(user, "u")
-        allowed = db.execute(f"SELECT COUNT(*) AS c FROM users u WHERE u.id=? AND {allowed_condition}", (selected_user_id, *allowed_params)).fetchone()["c"]
+    elif user["role"] == "manager":
+        allowed = db.execute("SELECT COUNT(*) AS c FROM users WHERE id=? AND manager_id=?", (selected_user_id, user["id"])).fetchone()["c"]
         if selected_user_id != user["id"] and not allowed:
             selected_user_id = user["id"]
     slips = db.execute("SELECT * FROM payroll_slips WHERE user_id=? ORDER BY id DESC", (selected_user_id,)).fetchall()
-    employees = team_user_rows(db, user) if can_manage_people(user["role"]) else []
+    employees = []
+    if user["role"] in {"manager", "hr", "admin"}:
+        if user["role"] == "manager":
+            employees = db.execute("SELECT id, full_name FROM users WHERE manager_id=? AND is_active=1 ORDER BY full_name", (user["id"],)).fetchall()
+        else:
+            employees = db.execute("SELECT id, full_name FROM users WHERE is_active=1 ORDER BY full_name").fetchall()
     selected_employee = db.execute("SELECT id, full_name FROM users WHERE id=?", (selected_user_id,)).fetchone()
     return render_template("payroll.html", slips=slips, employees=employees, selected_user_id=selected_user_id, selected_employee=selected_employee)
 
@@ -1522,7 +1536,7 @@ def payroll_view():
 
 @app.route("/attendance/add", methods=["GET", "POST"])
 @login_required
-@role_required("admin", "super_admin")
+@role_required("admin")
 def attendance_add():
     db = get_db()
     employees = db.execute("SELECT id, full_name FROM users WHERE is_active=1 ORDER BY full_name").fetchall()
@@ -1556,7 +1570,7 @@ def attendance_add():
 
 @app.route("/attendance/edit/<int:attendance_id>", methods=["GET", "POST"])
 @login_required
-@role_required("admin", "super_admin")
+@role_required("admin")
 def attendance_edit(attendance_id: int):
     db = get_db()
     record = db.execute("SELECT * FROM attendance WHERE id=?", (attendance_id,)).fetchone()
@@ -1591,7 +1605,7 @@ def attendance_edit(attendance_id: int):
 
 @app.route("/attendance/delete/<int:attendance_id>", methods=["POST"])
 @login_required
-@role_required("admin", "super_admin")
+@role_required("admin")
 def attendance_delete(attendance_id: int):
     db = get_db()
     record = db.execute("SELECT * FROM attendance WHERE id=?", (attendance_id,)).fetchone()
@@ -1607,7 +1621,7 @@ def attendance_delete(attendance_id: int):
 
 @app.route("/payroll/add", methods=["GET", "POST"])
 @login_required
-@role_required("admin", "super_admin")
+@role_required("admin")
 def payroll_add():
     db = get_db()
     employees = db.execute("SELECT id, full_name FROM users WHERE is_active=1 ORDER BY full_name").fetchall()
@@ -1635,7 +1649,7 @@ def payroll_add():
 
 @app.route("/payroll/edit/<int:slip_id>", methods=["GET", "POST"])
 @login_required
-@role_required("admin", "super_admin")
+@role_required("admin")
 def payroll_edit(slip_id: int):
     db = get_db()
     slip = db.execute("SELECT * FROM payroll_slips WHERE id=?", (slip_id,)).fetchone()
@@ -1664,7 +1678,7 @@ def payroll_edit(slip_id: int):
 
 @app.route("/payroll/delete/<int:slip_id>", methods=["POST"])
 @login_required
-@role_required("admin", "super_admin")
+@role_required("admin")
 def payroll_delete(slip_id: int):
     db = get_db()
     slip = db.execute("SELECT * FROM payroll_slips WHERE id=?", (slip_id,)).fetchone()
@@ -1679,7 +1693,7 @@ def payroll_delete(slip_id: int):
 
 @app.route("/reports")
 @login_required
-@role_required("hr", "admin", "super_admin")
+@role_required("hr", "admin")
 def reports():
     db = get_db()
     leave_summary = db.execute("SELECT status, COUNT(*) AS total FROM leave_applications GROUP BY status ORDER BY total DESC").fetchall()
@@ -1694,12 +1708,9 @@ def documents():
     user = current_user()
     db = get_db()
     employees = []
-    if is_admin_role(user["role"]) or is_hr_role(user["role"]):
+    if user["role"] in {"hr", "admin"}:
         docs = db.execute("SELECT ed.*, u.full_name FROM employee_documents ed JOIN users u ON ed.user_id=u.id ORDER BY ed.id DESC").fetchall()
         employees = db.execute("SELECT id, full_name, employee_code FROM users WHERE is_active=1 ORDER BY full_name").fetchall()
-    elif is_project_scoped_role(user["role"]):
-        docs = db.execute("SELECT ed.*, u.full_name FROM employee_documents ed JOIN users u ON ed.user_id=u.id WHERE u.project_id=? ORDER BY ed.id DESC", (user["project_id"],)).fetchall() if user["project_id"] else []
-        employees = db.execute("SELECT id, full_name, employee_code FROM users WHERE is_active=1 AND project_id=? ORDER BY full_name", (user["project_id"],)).fetchall() if user["project_id"] else []
     else:
         docs = db.execute("SELECT ed.*, u.full_name FROM employee_documents ed JOIN users u ON ed.user_id=u.id WHERE user_id=? ORDER BY ed.id DESC", (user["id"],)).fetchall()
     return render_template("documents.html", docs=docs, employees=employees)
@@ -1707,7 +1718,7 @@ def documents():
 
 @app.route("/documents/upload", methods=["POST"])
 @login_required
-@role_required("hr", "admin", "super_admin")
+@role_required("hr", "admin")
 def upload_document():
     db = get_db()
     user_id = int(request.form["user_id"])

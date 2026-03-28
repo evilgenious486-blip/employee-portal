@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div><h3 class="mb-1">{{ employee.full_name }}</h3><div class="text-secondary">{{ employee.employee_code }} · {{ employee.role|capitalize }} · {{ 'Active' if employee.is_active else 'Inactive' }}</div></div>
+  <div class="d-flex gap-2">
+    {% if current_user.role in ['hr','admin'] %}<a class="btn btn-primary" href="{{ url_for('edit_employee', user_id=employee.id) }}">Edit</a>{% endif %}{% if current_user.role == 'admin' and employee.id != current_user.id %}<form method="post" action="{{ url_for('hard_delete_employee', user_id=employee.id) }}" onsubmit="return confirm('Permanently delete this employee and all related records?');" class="d-inline"><button class="btn btn-danger">Delete</button></form>{% endif %}
+    <a class="btn btn-outline-secondary" href="{{ url_for('team') }}">Back</a>
+  </div>
+</div>
+<div class="row g-4">
+  <div class="col-lg-4"><div class="card border-0 shadow-sm rounded-4"><div class="card-body">
+    <h5 class="mb-3">Employee Details</h5>
+    <div class="mb-2"><strong>Email:</strong> {{ employee.email }}</div>
+    <div class="mb-2"><strong>Department:</strong> {{ employee.department_name or '-' }}</div>
+    <div class="mb-2"><strong>Designation:</strong> {{ employee.designation_name or '-' }}</div>
+    <div class="mb-2"><strong>Manager:</strong> {{ employee.manager_name or '-' }}</div>
+    <div class="mb-2"><strong>Phone:</strong> {{ employee.phone or '-' }}</div>
+    <div class="mb-2"><strong>Join Date:</strong> {{ employee.join_date or '-' }}</div>
+    <div class="mb-2"><strong>Address:</strong> {{ employee.address or '-' }}</div>
+    {% if current_user.role in ['hr','admin'] %}
+    <hr>
+    <div class="d-grid gap-2">
+      <form method="post" action="{{ url_for('reset_employee_password', user_id=employee.id) }}"><button class="btn btn-outline-warning w-100">Reset Password</button></form>
+      {% if current_user.role == 'admin' and employee.id != current_user.id %}
+      <form method="post" action="{{ url_for('delete_employee', user_id=employee.id) }}" onsubmit="return confirm('Deactivate this employee account?');"><button class="btn btn-outline-danger w-100">Deactivate Employee</button></form>
+      <form method="post" action="{{ url_for('hard_delete_employee', user_id=employee.id) }}" onsubmit="return confirm('Permanently delete this employee and all related records?');"><button class="btn btn-danger w-100">Permanent Delete</button></form>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div></div></div>
+  <div class="col-lg-8"><div class="card border-0 shadow-sm rounded-4"><div class="card-body">
+    <h5 class="mb-3">Leave Balances</h5>
+    <div class="table-responsive"><table class="table"><thead><tr><th>Leave Type</th><th>Total</th><th>Used</th><th>Remaining</th></tr></thead><tbody>{% for row in balances %}<tr><td>{{ row.leave_type_name }}</td><td>{{ row.total_days }}</td><td>{{ row.used_days }}</td><td>{{ row.remaining_days }}</td></tr>{% endfor %}</tbody></table></div>
+  </div></div></div>
+  <div class="col-lg-6"><div class="card border-0 shadow-sm rounded-4"><div class="card-body">
+    <h5 class="mb-3">Recent Attendance</h5>
+    <div class="table-responsive"><table class="table"><thead><tr><th>Date</th><th>Status</th><th>Check In</th><th>Check Out</th></tr></thead><tbody>{% for row in attendance_rows %}<tr><td>{{ row.attendance_date }}</td><td>{{ row.status }}</td><td>{{ row.check_in or '-' }}</td><td>{{ row.check_out or '-' }}</td></tr>{% else %}<tr><td colspan="4" class="text-secondary">No records</td></tr>{% endfor %}</tbody></table></div>
+  </div></div></div>
+  <div class="col-lg-6"><div class="card border-0 shadow-sm rounded-4"><div class="card-body">
+    <h5 class="mb-3">Recent Payslips</h5>
+    <div class="table-responsive"><table class="table"><thead><tr><th>Month</th><th>Net Salary</th></tr></thead><tbody>{% for row in slips %}<tr><td>{{ row.month_label }}</td><td>{{ row.net_salary }}</td></tr>{% else %}<tr><td colspan="2" class="text-secondary">No payslips</td></tr>{% endfor %}</tbody></table></div>
+    <h6 class="mt-4">Documents</h6>
+    <ul class="list-group list-group-flush">{% for row in docs %}<li class="list-group-item px-0 d-flex justify-content-between"><span>{{ row.title }}</span><a href="{{ url_for('uploaded_file', filename=row.file_name) }}" target="_blank">Open</a></li>{% else %}<li class="list-group-item px-0 text-secondary">No documents</li>{% endfor %}</ul>
+  </div></div></div>
+</div>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h3 class="mb-0">Leave Tracking</h3>
+  {% if current_user.role in ['employee', 'manager'] %}<a href="{{ url_for('apply_leave') }}" class="btn btn-primary">New Leave Request</a>{% endif %}
+</div>
+<div class="card border-0 shadow-sm rounded-4">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead>
+          <tr>
+            {% if current_user.role != 'employee' %}<th>Employee</th>{% endif %}
+            <th>Application No</th>
+            <th>Leave Type</th>
+            <th>Days</th>
+            <th>From</th>
+            <th>To</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in leaves %}
+          <tr>
+            {% if current_user.role != 'employee' %}<td>{{ row.full_name }}</td>{% endif %}
+            <td>{{ row.application_no }}</td>
+            <td>{{ row.leave_type_name }}</td>
+            <td>{{ row.total_days }}</td>
+            <td>{{ row.from_date }}</td>
+            <td>{{ row.to_date }}</td>
+            <td><span class="badge text-bg-light border">{{ row.status }}</span></td>
+            <td><a href="{{ url_for('leave_detail', leave_id=row.id) }}" class="btn btn-sm btn-outline-primary">View</a></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="text-center text-secondary py-4">No leave applications found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
