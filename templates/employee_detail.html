@@ -3,37 +3,134 @@
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
   <div>
     <h3 class="mb-1">{{ employee.full_name }}</h3>
-    <div class="text-secondary">{{ employee.employee_code }} · {{ role_label(employee.role) }} · {{ 'Active' if employee.is_active else 'Inactive' }}</div>
+    <div class="text-secondary">
+      {{ employee.employee_code }} · {{ role_label(employee.role) }} · 
+      {{ 'Active' if employee.is_active else 'Inactive' }}
+    </div>
   </div>
+
   <div class="d-flex gap-2">
-    {% if current_user.role in ['hr','admin','super_admin'] %}<a class="btn btn-primary" href="{{ url_for('edit_employee', user_id=employee.id) }}">Edit</a>{% endif %}
-    <a class="btn btn-outline-secondary" href="{{ url_for('team') }}">Back</a>
+    {% if current_user.role in ['hr','admin','super_admin'] %}
+    <a class="btn btn-primary"
+       href="{{ url_for('edit_employee', user_id=employee.id) }}">
+       Edit
+    </a>
+    {% endif %}
+
+    <a class="btn btn-outline-secondary"
+       href="{{ url_for('team') }}">
+       Back
+    </a>
   </div>
 </div>
+
+
 <div class="row g-4">
-  <div class="col-lg-4"><div class="card border-0 shadow-sm rounded-4"><div class="card-body">
-    <h5 class="mb-3">Employee Details</h5>
-    <div class="mb-2"><strong>Email:</strong> {{ employee.email }}</div>
-    <div class="mb-2"><strong>Project:</strong> {{ employee.project_name or '-' }}{% if employee.project_code %} <span class="text-secondary small">({{ employee.project_code }})</span>{% endif %}</div>
-    <div class="mb-2"><strong>Department:</strong> {{ employee.department_name or '-' }}</div>
-    <div class="mb-2"><strong>Designation:</strong> {{ employee.designation_name or '-' }}</div>
-    <div class="mb-2"><strong>Manager:</strong> {{ employee.manager_name or '-' }}</div>
-    <div class="mb-2"><strong>Phone:</strong> {{ employee.phone or '-' }}</div>
-    <div class="mb-2"><strong>Join Date:</strong> {{ employee.join_date or '-' }}</div>
-    <div class="mb-2"><strong>Address:</strong> {{ employee.address or '-' }}</div>
-    {% if current_user.role in ['hr','admin','super_admin'] %}
-    <hr>
-    <div class="d-grid gap-2">
-      <form method="post" action="{{ url_for('reset_employee_password', user_id=employee.id) }}"><button class="btn btn-outline-warning w-100">Reset Password</button></form>
-      {% if current_user.role in ['admin','super_admin'] %}
-      <form method="post" action="{{ url_for('delete_employee', user_id=employee.id) }}" onsubmit="return confirm('Deactivate this employee account?');"><button class="btn btn-outline-danger w-100">Deactivate Employee</button></form>
-      {% endif %}
+
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm rounded-4">
+      <div class="card-body">
+
+        <h5 class="mb-3">Employee Details</h5>
+
+        <div class="mb-2"><strong>Email:</strong> {{ employee.email }}</div>
+
+        <div class="mb-2">
+          <strong>Project:</strong>
+          {{ employee.project_name or '-' }}
+          {% if employee.project_code %}
+            <span class="text-secondary small">
+              ({{ employee.project_code }})
+            </span>
+          {% endif %}
+        </div>
+
+        <div class="mb-2"><strong>Department:</strong> {{ employee.department_name or '-' }}</div>
+        <div class="mb-2"><strong>Designation:</strong> {{ employee.designation_name or '-' }}</div>
+        <div class="mb-2"><strong>Manager:</strong> {{ employee.manager_name or '-' }}</div>
+        <div class="mb-2"><strong>Phone:</strong> {{ employee.phone or '-' }}</div>
+        <div class="mb-2"><strong>Join Date:</strong> {{ employee.join_date or '-' }}</div>
+        <div class="mb-2"><strong>Address:</strong> {{ employee.address or '-' }}</div>
+
+
+        {% if current_user.role in ['hr','admin','super_admin'] %}
+        <hr>
+
+        <div class="d-grid gap-2">
+
+          <form method="post"
+                action="{{ url_for('reset_employee_password', user_id=employee.id) }}">
+            <button class="btn btn-outline-warning w-100">
+              Reset Password
+            </button>
+          </form>
+
+
+          <!-- ONLY SUPER ADMIN CAN DELETE -->
+          {% if current_user.role == 'super_admin' %}
+          <form method="post"
+                action="{{ url_for('delete_employee', user_id=employee.id) }}"
+                onsubmit="return confirm('Deactivate this employee account?');">
+
+            <button class="btn btn-outline-danger w-100">
+              Deactivate Employee
+            </button>
+
+          </form>
+          {% endif %}
+
+        </div>
+
+        {% endif %}
+
+      </div>
     </div>
-    {% endif %}
-  </div></div></div>
-  <div class="col-lg-8"><div class="card border-0 shadow-sm rounded-4"><div class="card-body">
-    <h5 class="mb-3">Leave Balances</h5>
-    <div class="table-responsive"><table class="table"><thead><tr><th>Leave Type</th><th>Total</th><th>Used</th><th>Remaining</th></tr></thead><tbody>{% for row in balances %}<tr><td>{{ row.leave_type_name }}</td><td>{{ row.total_days }}</td><td>{{ row.used_days }}</td><td>{{ row.remaining_days }}</td></tr>{% endfor %}</tbody></table></div>
-  </div></div></div>
+  </div>
+
+
+
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm rounded-4">
+      <div class="card-body">
+
+        <h5 class="mb-3">Leave Balances</h5>
+
+        <div class="table-responsive">
+
+          <table class="table">
+
+            <thead>
+              <tr>
+                <th>Leave Type</th>
+                <th>Total</th>
+                <th>Used</th>
+                <th>Remaining</th>
+              </tr>
+            </thead>
+
+            <tbody>
+
+              {% for row in balances %}
+              <tr>
+
+                <td>{{ row.leave_type_name }}</td>
+                <td>{{ row.total_days }}</td>
+                <td>{{ row.used_days }}</td>
+                <td>{{ row.remaining_days }}</td>
+
+              </tr>
+              {% endfor %}
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+
 </div>
 {% endblock %}
