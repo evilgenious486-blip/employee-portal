@@ -67,13 +67,13 @@
 
 
           <!-- ONLY SUPER ADMIN CAN DELETE -->
-          {% if current_user.role == 'super_admin' %}
+          {% if is_admin_role(current_user.role) and current_user.id != employee.id %}
           <form method="post"
                 action="{{ url_for('delete_employee', user_id=employee.id) }}"
-                onsubmit="return confirm('Deactivate this employee account?');">
+                onsubmit="return confirm('Delete this employee permanently? This action cannot be undone.');">
 
             <button class="btn btn-outline-danger w-100">
-              Deactivate Employee
+              Delete Employee
             </button>
 
           </form>

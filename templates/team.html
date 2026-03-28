@@ -70,6 +70,11 @@
               {% if current_user.role in ['hr','admin','super_admin'] %}
               <a href="{{ url_for('edit_employee', user_id=row.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
               {% endif %}
+              {% if is_admin_role(current_user.role) and current_user.id != row.id %}
+              <form method="post" action="{{ url_for('delete_employee', user_id=row.id) }}" class="d-inline" onsubmit="return confirm('Delete this employee permanently? This action cannot be undone.');">
+                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+              </form>
+              {% endif %}
             </td>
           </tr>
           {% else %}

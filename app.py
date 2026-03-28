@@ -1423,21 +1423,48 @@ def employee_form_handler(user_id: int | None = None):
 @role_required("admin", "super_admin")
 def delete_employee(user_id: int):
     db = get_db()
+    actor = current_user()
     employee = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
     if not employee:
         flash("Employee not found.", "danger")
         return redirect(url_for("team"))
-    if employee["role"] == "admin":
-        active_admins = db.execute("SELECT COUNT(*) AS c FROM users WHERE role='admin' AND is_active=1").fetchone()["c"]
-        if active_admins <= 1:
-            flash("You cannot delete the last active admin.", "danger")
+    if actor and actor["id"] == user_id:
+        flash("You cannot delete your own account while logged in.", "danger")
+        return redirect(url_for("employee_detail", user_id=user_id))
+    if employee["role"] in {"admin", "super_admin"}:
+        active_super_admins = db.execute("SELECT COUNT(*) AS c FROM users WHERE role IN ('admin', 'super_admin') AND is_active=1").fetchone()["c"]
+        if active_super_admins <= 1:
+            flash("You cannot delete the last active Super Admin.", "danger")
             return redirect(url_for("employee_detail", user_id=user_id))
-    db.execute("UPDATE users SET is_active=0, manager_id=NULL WHERE id=?", (user_id,))
+
+    avatar_filename = employee["avatar_filename"]
+
     db.execute("UPDATE users SET manager_id=NULL WHERE manager_id=?", (user_id,))
-    notify_user(user_id, "Account deactivated", "Your employee portal access has been deactivated.", None)
-    log_audit("Employee", "Deactivated", f"Deactivated employee {employee['employee_code']}", user_id)
+    db.execute("UPDATE projects SET created_by=NULL WHERE created_by=?", (user_id,))
+    db.execute("UPDATE audit_logs SET actor_user_id=NULL WHERE actor_user_id=?", (user_id,))
+    db.execute("UPDATE audit_logs SET target_user_id=NULL WHERE target_user_id=?", (user_id,))
+    db.execute("UPDATE leave_history SET action_by=NULL WHERE action_by=?", (user_id,))
+    db.execute("DELETE FROM notifications WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM email_queue WHERE to_user_id=?", (user_id,))
+    db.execute("DELETE FROM employee_documents WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM payroll_slips WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM attendance WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM leave_history WHERE leave_application_id IN (SELECT id FROM leave_applications WHERE user_id=?)", (user_id,))
+    db.execute("DELETE FROM leave_applications WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM leave_balances WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM users WHERE id=?", (user_id,))
+
+    if avatar_filename:
+        avatar_path = UPLOAD_FOLDER / avatar_filename
+        if avatar_path.exists():
+            try:
+                avatar_path.unlink()
+            except OSError:
+                pass
+
+    log_audit("Employee", "Deleted", f"Deleted employee {employee['employee_code']}", None)
     db.commit()
-    flash("Employee deactivated successfully.", "success")
+    flash("Employee deleted successfully.", "success")
     return redirect(url_for("team"))
 
 
