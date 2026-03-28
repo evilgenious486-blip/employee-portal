@@ -9,8 +9,8 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, flash, g, redirect, render_template, request, send_from_directory, session, url_for
-from openpyxl import load_workbook
+from flask import Flask, flash, g, redirect, render_template, request, send_file, send_from_directory, session, url_for
+from openpyxl import Workbook, load_workbook
 import io
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
@@ -114,6 +114,31 @@ def team_user_rows(db: sqlite3.Connection, viewer: sqlite3.Row):
         LEFT JOIN designations ds ON u.designation_id=ds.id
         LEFT JOIN projects p ON u.project_id=p.id
         WHERE u.is_active=1 AND """ + cond + " ORDER BY u.full_name"
+    return db.execute(query, tuple(params)).fetchall()
+
+
+def employee_directory_rows(db: sqlite3.Connection, viewer: sqlite3.Row, search: str = "", project_filter: int | None = None):
+    query = """
+        SELECT u.*, d.name AS department_name, ds.name AS designation_name, p.project_name, p.project_code
+        FROM users u
+        LEFT JOIN departments d ON u.department_id=d.id
+        LEFT JOIN designations ds ON u.designation_id=ds.id
+        LEFT JOIN projects p ON u.project_id=p.id
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+    visible_condition, visible_params = visible_user_filter(viewer, "u")
+    conditions.append(visible_condition)
+    params.extend(visible_params)
+    if project_filter:
+        conditions.append("u.project_id = ?")
+        params.append(project_filter)
+    if search:
+        conditions.append("(u.full_name LIKE ? OR u.employee_code LIKE ? OR u.email LIKE ? OR ifnull(p.project_name,'') LIKE ?)")
+        like = f"%{search}%"
+        params.extend([like, like, like, like])
+    query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY p.project_name, u.full_name"
     return db.execute(query, tuple(params)).fetchall()
 
 
@@ -1209,30 +1234,103 @@ def team():
     db = get_db()
     search = request.args.get("q", "").strip()
     project_filter = request.args.get("project_id", type=int)
-    query = """
-        SELECT u.*, d.name AS department_name, ds.name AS designation_name, p.project_name, p.project_code
-        FROM users u
-        LEFT JOIN departments d ON u.department_id=d.id
-        LEFT JOIN designations ds ON u.designation_id=ds.id
-        LEFT JOIN projects p ON u.project_id=p.id
-    """
-    conditions = []
-    params: list[Any] = []
-    visible_condition, visible_params = visible_user_filter(user, "u")
-    conditions.append(visible_condition)
-    params.extend(visible_params)
-    if project_filter:
-        conditions.append("u.project_id = ?")
-        params.append(project_filter)
-    if search:
-        conditions.append("(u.full_name LIKE ? OR u.employee_code LIKE ? OR u.email LIKE ? OR ifnull(p.project_name,'') LIKE ?)")
-        like = f"%{search}%"
-        params.extend([like, like, like, like])
-    query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY p.project_name, u.full_name"
-    employees = db.execute(query, tuple(params)).fetchall()
+    employees = employee_directory_rows(db, user, search=search, project_filter=project_filter)
     projects = project_choice_rows(db, user)
     return render_template("team.html", employees=employees, search=search, projects=projects, selected_project_id=project_filter)
+
+
+@app.route("/team/export")
+@login_required
+@role_required("manager", "project_manager", "site_manager", "engineer", "hr", "admin", "super_admin")
+def export_team():
+    user = current_user()
+    db = get_db()
+    search = request.args.get("q", "").strip()
+    project_filter = request.args.get("project_id", type=int)
+    export_scope = (request.args.get("scope") or "current").strip().lower()
+
+    if export_scope == "full" and not (is_admin_role(user["role"]) or is_hr_role(user["role"])):
+        flash("You can export employees from your own project only.", "danger")
+        return redirect(url_for("team", q=search, project_id=project_filter))
+
+    effective_project_filter = None if export_scope == "full" else project_filter
+    employees = employee_directory_rows(db, user, search=search, project_filter=effective_project_filter)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Employees"
+    headers = [
+        "Employee Code",
+        "Full Name",
+        "Email",
+        "Phone",
+        "Project Code",
+        "Project Name",
+        "Department",
+        "Designation",
+        "Role",
+        "Joining Date",
+        "Status",
+    ]
+    ws.append(headers)
+
+    for row in employees:
+        ws.append([
+            row["employee_code"],
+            row["full_name"],
+            row["email"],
+            row["phone"] or "",
+            row["project_code"] or "",
+            row["project_name"] or "",
+            row["department_name"] or "",
+            row["designation_name"] or "",
+            role_label(row["role"]),
+            row["join_date"] or "",
+            "Active" if row["is_active"] else "Inactive",
+        ])
+
+    for cell in ws[1]:
+        cell.font = cell.font.copy(bold=True)
+
+    widths = {
+        "A": 18, "B": 26, "C": 30, "D": 18, "E": 16, "F": 24,
+        "G": 18, "H": 20, "I": 18, "J": 16, "K": 12,
+    }
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+
+    ws.freeze_panes = "A2"
+
+    meta = wb.create_sheet("Export Info")
+    meta.append(["Generated At", now_str()])
+    meta.append(["Generated By", user["full_name"]])
+    meta.append(["Role", role_label(user["role"])])
+    meta.append(["Scope", "Full Employee List" if export_scope == "full" else "Project / Filtered Employee List"])
+    meta.append(["Search", search or "All"])
+    if effective_project_filter:
+        project = db.execute("SELECT project_code, project_name FROM projects WHERE id=?", (effective_project_filter,)).fetchone()
+        project_label = f"{project['project_code']} - {project['project_name']}" if project else str(effective_project_filter)
+    elif export_scope == "full":
+        project_label = "All Projects"
+    else:
+        project_label = user["project_name"] or "All Visible Projects"
+    meta.append(["Project Filter", project_label])
+    meta.append(["Total Employees", len(employees)])
+    meta.column_dimensions["A"].width = 20
+    meta.column_dimensions["B"].width = 40
+
+    filename_scope = "full_employee_list" if export_scope == "full" else "project_employee_list"
+    safe_project = project_label.lower().replace(" ", "_").replace("/", "-") if project_label else "all"
+    safe_project = "".join(ch for ch in safe_project if ch.isalnum() or ch in {"_", "-"})[:40] or "all"
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f"{filename_scope}_{safe_project}_{date.today().isoformat()}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @app.route("/employees/<int:user_id>")

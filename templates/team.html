@@ -16,6 +16,12 @@
     <a class="btn btn-primary" href="{{ url_for('new_employee') }}"><i class="bi bi-person-plus me-1"></i>Add Employee</a>
     <a class="btn btn-outline-primary" href="{{ url_for('bulk_employee_upload') }}"><i class="bi bi-file-earmark-arrow-up me-1"></i>Bulk Add</a>
     {% endif %}
+    {% if is_admin_role(current_user.role) or current_user.role == 'hr' %}
+    <a class="btn btn-success" href="{{ url_for('export_team', q=search, project_id=selected_project_id) }}"><i class="bi bi-download me-1"></i>Export Project / Filtered List</a>
+    <a class="btn btn-outline-success" href="{{ url_for('export_team', scope='full') }}"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Full Employee List</a>
+    {% else %}
+    <a class="btn btn-success" href="{{ url_for('export_team', q=search, project_id=selected_project_id) }}"><i class="bi bi-download me-1"></i>Export My Project Employees</a>
+    {% endif %}
     <form class="d-flex gap-2 flex-wrap" method="get">
       {% if is_admin_role(current_user.role) or current_user.role == 'hr' %}
       <select class="form-select" name="project_id" style="min-width:220px;">
