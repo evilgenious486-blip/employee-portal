@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% set title = 'Projects' %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm rounded-4">
+      <div class="card-body p-4">
+        <h4 class="mb-1">{{ 'Edit Project' if project else 'Create Project' }}</h4>
+        <div class="text-secondary small mb-3">Super Admin can create and update projects here.</div>
+        <form method="post" class="row g-3">
+          {% if project %}<input type="hidden" name="project_id" value="{{ project.id }}">{% endif %}
+          <div class="col-12"><label class="form-label">Project Code</label><input class="form-control" name="project_code" value="{{ project.project_code if project else '' }}" required></div>
+          <div class="col-12"><label class="form-label">Project Name</label><input class="form-control" name="project_name" value="{{ project.project_name if project else '' }}" required></div>
+          <div class="col-12"><label class="form-label">Location</label><input class="form-control" name="location" value="{{ project.location if project else '' }}"></div>
+          <div class="col-12"><label class="form-label">Client</label><input class="form-control" name="client_name" value="{{ project.client_name if project else '' }}"></div>
+          <div class="col-md-6"><label class="form-label">Start Date</label><input type="date" class="form-control" name="start_date" value="{{ project.start_date if project else '' }}"></div>
+          <div class="col-md-6"><label class="form-label">End Date</label><input type="date" class="form-control" name="end_date" value="{{ project.end_date if project else '' }}"></div>
+          <div class="col-12"><label class="form-label">Status</label><select class="form-select" name="status"><option value="Active" {% if not project or project.status == 'Active' %}selected{% endif %}>Active</option><option value="On Hold" {% if project and project.status == 'On Hold' %}selected{% endif %}>On Hold</option><option value="Completed" {% if project and project.status == 'Completed' %}selected{% endif %}>Completed</option></select></div>
+          <div class="col-12 d-flex gap-2"><button class="btn btn-primary">{{ 'Update Project' if project else 'Create Project' }}</button>{% if project %}<a class="btn btn-outline-secondary" href="{{ url_for('projects_view') }}">Cancel</a>{% endif %}</div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm rounded-4">
+      <div class="card-body p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3"><h4 class="mb-0">All Projects</h4><span class="badge text-bg-light border">{{ projects|length }} projects</span></div>
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead><tr><th>Code</th><th>Project</th><th>Location</th><th>Client</th><th>Status</th><th>Employees</th><th></th></tr></thead>
+            <tbody>
+              {% for row in projects %}
+              <tr>
+                <td>{{ row.project_code }}</td>
+                <td class="fw-semibold">{{ row.project_name }}</td>
+                <td>{{ row.location or '-' }}</td>
+                <td>{{ row.client_name or '-' }}</td>
+                <td>{{ row.status }}</td>
+                <td>{{ row.employee_count }}</td>
+                <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('projects_view', edit=row.id) }}">Edit</a></td>
+              </tr>
+              {% else %}
+              <tr><td colspan="7" class="text-center text-secondary py-4">No projects created yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
