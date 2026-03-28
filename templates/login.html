@@ -2,372 +2,140 @@
 {% set title = "Login" %}
 
 {% block public_content %}
-<div class="portal-login-page">
-  <div class="portal-login-shell">
 
-    <div class="portal-login-left">
-      <div class="portal-login-left-inner">
-        <div class="brand-card">
-          <img src="{{ url_for('static', filename='images/pacost_logo.png') }}" alt="Pacost Logo">
-        </div>
+<div class="login-page">
 
-        <div class="brand-kicker">PACOST INTERNATIONAL</div>
+  <div class="login-box">
 
-        <h1 class="brand-title">
-          One smart portal for
-          workforce access and
-          approvals.
-        </h1>
-
-        <p class="brand-text">
-          A cleaner way to manage attendance, leave, payroll, employee documents, and approval workflows across the organization.
-        </p>
-
-        <div class="feature-list">
-          <div class="feature-item">
-            <span class="feature-icon">✓</span>
-            <span>Secure role-based access for HR, managers, engineers, and employees</span>
-          </div>
-
-          <div class="feature-item">
-            <span class="feature-icon">✓</span>
-            <span>Attendance, payroll, requests, and approvals in one place</span>
-          </div>
-
-          <div class="feature-item">
-            <span class="feature-icon">✓</span>
-            <span>Designed for desktop and mobile access</span>
-          </div>
-        </div>
-
-        <div class="brand-footer">Excellence Endures</div>
+      <div class="logo-area">
+          <img src="{{ url_for('static', filename='images/pacost_logo.png') }}" class="company-logo">
       </div>
-    </div>
 
-    <div class="portal-login-right">
-      <div class="login-panel">
-        <div class="login-badge">Secure employee portal</div>
+      <h1 class="portal-title">
+          Employee Login Portal
+      </h1>
 
-        <h2 class="login-title">Sign in</h2>
-        <p class="login-subtitle">
-          Enter employee email or code and password to continue.
-        </p>
+      {% if error %}
+      <div class="alert alert-danger mt-3">
+          {{ error }}
+      </div>
+      {% endif %}
 
-        {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            {% for category, message in messages %}
-              <div class="alert {% if category == 'success' %}alert-success{% elif category == 'warning' %}alert-warning{% else %}alert-light border{% endif %} rounded-4 mb-3">
-                {{ message }}
-              </div>
-            {% endfor %}
-          {% endif %}
-        {% endwith %}
+      <form method="POST" action="{{ url_for('login') }}" autocomplete="off">
 
-        {% if error %}
-          <div class="alert alert-danger rounded-4 mb-3">
-            {{ error }}
-          </div>
-        {% endif %}
-
-        <form method="POST" action="{{ url_for('login') }}" autocomplete="off">
           <input type="text" style="display:none">
           <input type="password" style="display:none">
 
           <div class="mb-3">
-            <label for="identifier" class="login-label">Email or Employee Code</label>
-            <input
-              type="text"
-              class="form-control login-input"
-              id="identifier"
-              name="identifier"
-              required
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              spellcheck="false"
-            >
+              <label class="form-label">Email or Employee Code</label>
+
+              <input
+                  type="text"
+                  class="form-control login-input"
+                  name="identifier"
+                  required
+                  autocomplete="off"
+              >
           </div>
 
-          <div class="mb-2">
-            <label for="password" class="login-label">Password</label>
-            <input
-              type="password"
-              class="form-control login-input"
-              id="password"
-              name="password"
-              required
-              autocomplete="new-password"
-            >
+          <div class="mb-3">
+              <label class="form-label">Password</label>
+
+              <input
+                  type="password"
+                  class="form-control login-input"
+                  name="password"
+                  required
+                  autocomplete="new-password"
+              >
           </div>
 
-          <div class="login-meta">
-            <a href="{{ url_for('forgot_password') }}" class="forgot-link">Forgot password?</a>
+          <div class="text-end mb-3">
+              <a href="{{ url_for('forgot_password') }}" class="forgot-link">
+                  Forgot password?
+              </a>
           </div>
 
-          <button type="submit" class="login-btn-main">
-            Login to Portal
+          <button type="submit" class="login-btn">
+              Login
           </button>
-        </form>
-      </div>
-    </div>
+
+      </form>
 
   </div>
+
 </div>
 
+
 <style>
-  .portal-login-page{
+
+.login-page{
     min-height:100vh;
     display:flex;
     align-items:center;
     justify-content:center;
-    padding:32px;
-    background:
-      radial-gradient(circle at top left, rgba(255,255,255,0.85), transparent 35%),
-      linear-gradient(135deg, #eef3f9 0%, #f8fafc 100%);
-  }
+    background:#f5f7fb;
+}
 
-  .portal-login-shell{
+.login-box{
     width:100%;
-    max-width:1280px;
-    min-height:760px;
-    display:grid;
-    grid-template-columns: 1.05fr 0.95fr;
-    background:#ffffff;
-    border-radius:30px;
-    overflow:hidden;
-    box-shadow:0 30px 80px rgba(15, 23, 42, 0.16);
-  }
+    max-width:420px;
+    background:white;
+    padding:45px 38px;
+    border-radius:18px;
+    box-shadow:0 18px 45px rgba(0,0,0,0.08);
+    text-align:center;
+}
 
-  .portal-login-left{
-    position:relative;
-    background:
-      radial-gradient(circle at top right, rgba(255,255,255,0.08), transparent 28%),
-      radial-gradient(circle at bottom left, rgba(255,255,255,0.07), transparent 24%),
-      linear-gradient(160deg, #10233d 0%, #17335a 52%, #24487b 100%);
-    color:#fff;
-    padding:56px 54px;
-  }
+.logo-area{
+    margin-bottom:25px;
+}
 
-  .portal-login-left-inner{
-    height:100%;
-    display:flex;
-    flex-direction:column;
-  }
+.company-logo{
+    width:180px;
+    height:auto;
+}
 
-  .brand-card{
-    width:220px;
-    min-height:124px;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    background:rgba(255,255,255,0.97);
-    border-radius:26px;
-    padding:22px;
-    box-shadow:0 16px 38px rgba(0,0,0,0.16);
-    margin-bottom:44px;
-  }
-
-  .brand-card img{
-    max-width:100%;
-    max-height:72px;
-    object-fit:contain;
-  }
-
-  .brand-kicker{
-    font-size:13px;
+.portal-title{
+    font-size:26px;
     font-weight:700;
-    letter-spacing:3px;
-    opacity:0.78;
-    margin-bottom:18px;
-  }
+    margin-bottom:25px;
+    color:#1e293b;
+}
 
-  .brand-title{
-    font-size:56px;
-    line-height:1.03;
-    font-weight:800;
-    letter-spacing:-1px;
-    margin:0 0 24px 0;
-    max-width:560px;
-  }
-
-  .brand-text{
-    font-size:18px;
-    line-height:1.9;
-    opacity:0.92;
-    max-width:520px;
-    margin-bottom:34px;
-  }
-
-  .feature-list{
-    display:grid;
-    gap:18px;
-    max-width:530px;
-    margin-top:6px;
-  }
-
-  .feature-item{
-    display:flex;
-    align-items:flex-start;
-    gap:14px;
-    font-size:17px;
-    line-height:1.65;
-  }
-
-  .feature-icon{
-    width:32px;
-    height:32px;
-    min-width:32px;
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    border-radius:50%;
-    background:rgba(255,255,255,0.16);
-    font-weight:700;
-  }
-
-  .brand-footer{
-    margin-top:auto;
-    font-size:14px;
-    opacity:0.76;
-    letter-spacing:0.3px;
-    padding-top:36px;
-  }
-
-  .portal-login-right{
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    padding:42px;
-    background:
-      radial-gradient(circle at top right, rgba(36,72,123,0.05), transparent 30%),
-      #ffffff;
-  }
-
-  .login-panel{
-    width:100%;
-    max-width:470px;
-    padding:22px 8px;
-  }
-
-  .login-badge{
-    display:inline-flex;
-    align-items:center;
-    gap:8px;
-    padding:8px 16px;
-    border-radius:999px;
-    background:#eef4fb;
-    color:#28466f;
-    font-size:13px;
-    font-weight:700;
-    margin-bottom:22px;
-  }
-
-  .login-title{
-    font-size:48px;
-    font-weight:800;
-    color:#122846;
-    letter-spacing:-1px;
-    margin:0 0 12px 0;
-  }
-
-  .login-subtitle{
-    font-size:17px;
-    color:#667085;
-    line-height:1.75;
-    margin-bottom:30px;
-  }
-
-  .login-label{
+.login-input{
+    height:52px;
+    border-radius:10px;
+    border:1px solid #e2e8f0;
     font-size:15px;
-    font-weight:700;
-    color:#334155;
-    margin-bottom:10px;
-    display:block;
-  }
+}
 
-  .login-input{
-    height:62px;
-    border-radius:18px;
-    border:1px solid #d9e2ef;
-    background:#fbfcfe;
-    padding:0 18px;
-    font-size:16px;
-    box-shadow:none !important;
-    transition:all 0.2s ease;
-  }
+.login-input:focus{
+    border-color:#f58220;
+    box-shadow:0 0 0 2px rgba(245,130,32,0.15);
+}
 
-  .login-input:focus{
-    border-color:#8eb2e5;
-    background:#ffffff;
-    box-shadow:0 0 0 4px rgba(63, 114, 194, 0.10) !important;
-  }
-
-  .login-meta{
-    display:flex;
-    justify-content:flex-end;
-    margin:12px 0 28px 0;
-  }
-
-  .forgot-link{
-    text-decoration:none;
-    font-size:14px;
-    font-weight:700;
-    color:#2d63c8;
-  }
-
-  .forgot-link:hover{
-    text-decoration:underline;
-  }
-
-  .login-btn-main{
+.login-btn{
     width:100%;
-    height:60px;
+    height:52px;
     border:none;
-    border-radius:18px;
-    background:linear-gradient(135deg,#f7922e 0%, #f97316 100%);
-    color:#fff;
-    font-size:20px;
-    font-weight:800;
-    box-shadow:0 16px 34px rgba(245,130,32,0.26);
-    transition:all 0.2s ease;
-  }
+    border-radius:10px;
+    background:#f58220;
+    color:white;
+    font-size:16px;
+    font-weight:600;
+}
 
-  .login-btn-main:hover{
-    transform:translateY(-1px);
-    box-shadow:0 20px 36px rgba(245,130,32,0.30);
-  }
+.login-btn:hover{
+    background:#ea580c;
+}
 
-  @media (max-width: 991.98px){
-    .portal-login-page{
-      padding:18px;
-    }
+.forgot-link{
+    font-size:13px;
+    text-decoration:none;
+    color:#2563eb;
+}
 
-    .portal-login-shell{
-      grid-template-columns:1fr;
-      min-height:auto;
-      border-radius:24px;
-    }
-
-    .portal-login-left{
-      display:none;
-    }
-
-    .portal-login-right{
-      padding:26px 18px;
-    }
-
-    .login-panel{
-      max-width:100%;
-      padding:8px 2px;
-    }
-
-    .login-title{
-      font-size:38px;
-    }
-
-    .login-subtitle{
-      font-size:15px;
-    }
-  }
 </style>
+
 {% endblock %}
