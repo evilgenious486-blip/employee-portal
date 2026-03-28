@@ -6,7 +6,7 @@
     <div class="card border-0 shadow-sm rounded-4">
       <div class="card-body p-4">
         <h4 class="mb-1">{{ 'Edit Project' if project else 'Create Project' }}</h4>
-        <div class="text-secondary small mb-3">Super Admin can create and update projects here.</div>
+        <div class="text-secondary small mb-3">Super Admin can create, update, and delete projects here.</div>
         <form method="post" class="row g-3">
           {% if project %}<input type="hidden" name="project_id" value="{{ project.id }}">{% endif %}
           <div class="col-12"><label class="form-label">Project Code</label><input class="form-control" name="project_code" value="{{ project.project_code if project else '' }}" required></div>
@@ -37,7 +37,12 @@
                 <td>{{ row.client_name or '-' }}</td>
                 <td>{{ row.status }}</td>
                 <td>{{ row.employee_count }}</td>
-                <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('projects_view', edit=row.id) }}">Edit</a></td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('projects_view', edit=row.id) }}">Edit</a>
+                  <form method="post" action="{{ url_for('delete_project', project_id=row.id) }}" class="d-inline" onsubmit="return confirm('Delete this project permanently? This action cannot be undone.');">
+                    <button type="submit" class="btn btn-sm btn-outline-danger" {% if row.employee_count > 0 or projects|length <= 1 %}disabled title="Reassign employees first or keep at least one project."{% endif %}>Delete</button>
+                  </form>
+                </td>
               </tr>
               {% else %}
               <tr><td colspan="7" class="text-center text-secondary py-4">No projects created yet.</td></tr>

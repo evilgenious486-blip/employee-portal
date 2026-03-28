@@ -148,6 +148,44 @@ def ensure_schema(db: sqlite3.Connection) -> None:
         created_at TEXT NOT NULL,
         FOREIGN KEY (created_by) REFERENCES users (id)
     )""")
+    project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
+    if "project_code" not in project_cols:
+        db.execute("ALTER TABLE projects ADD COLUMN project_code TEXT")
+        rows = db.execute("SELECT id, project_name FROM projects ORDER BY id").fetchall()
+        for row in rows:
+            code = f"PRJ-{row['id']:03d}"
+            db.execute("UPDATE projects SET project_code=? WHERE id=?", (code, row["id"]))
+        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
+    if "location" not in project_cols:
+        db.execute("ALTER TABLE projects ADD COLUMN location TEXT")
+        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
+    if "client_name" not in project_cols:
+        db.execute("ALTER TABLE projects ADD COLUMN client_name TEXT")
+        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
+    if "status" not in project_cols:
+        db.execute("ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'Active'")
+        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
+    if "start_date" not in project_cols:
+        db.execute("ALTER TABLE projects ADD COLUMN start_date TEXT")
+        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
+    if "end_date" not in project_cols:
+        db.execute("ALTER TABLE projects ADD COLUMN end_date TEXT")
+        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
+    if "created_by" not in project_cols:
+        db.execute("ALTER TABLE projects ADD COLUMN created_by INTEGER")
+        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
+    if "created_at" not in project_cols:
+        db.execute("ALTER TABLE projects ADD COLUMN created_at TEXT")
+        db.execute("UPDATE projects SET created_at=? WHERE created_at IS NULL", (now_str(),))
+
+    db.execute("""CREATE TABLE IF NOT EXISTS company_settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_name TEXT NOT NULL DEFAULT 'Pacost International',
+        leave_workflow TEXT NOT NULL DEFAULT 'Supervisor → Department Engineer → Site Manager → Project Engineer → Project Manager → HR',
+        default_working_hours REAL NOT NULL DEFAULT 8,
+        allow_document_upload INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )""")
     users_sql_row = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
     users_sql = users_sql_row[0] if users_sql_row else ''
     if users_sql and "CHECK(role IN ('employee', 'manager', 'hr', 'admin'))" in users_sql:
@@ -1257,6 +1295,36 @@ def projects_view():
                 return redirect(url_for("projects_view"))
     projects = db.execute("SELECT p.*, COUNT(u.id) AS employee_count FROM projects p LEFT JOIN users u ON u.project_id=p.id AND u.is_active=1 GROUP BY p.id ORDER BY p.project_name").fetchall()
     return render_template("projects.html", projects=projects, project=project)
+
+
+@app.route("/projects/<int:project_id>/delete", methods=["POST"])
+@login_required
+@role_required("admin", "super_admin")
+def delete_project(project_id: int):
+    db = get_db()
+    project = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+    if not project:
+        flash("Project not found.", "danger")
+        return redirect(url_for("projects_view"))
+
+    assigned_count = db.execute(
+        "SELECT COUNT(*) AS c FROM users WHERE project_id=?",
+        (project_id,),
+    ).fetchone()["c"]
+    if assigned_count > 0:
+        flash("Cannot delete this project because employees are still assigned to it. Reassign them first.", "danger")
+        return redirect(url_for("projects_view"))
+
+    total_projects = db.execute("SELECT COUNT(*) AS c FROM projects").fetchone()["c"]
+    if total_projects <= 1:
+        flash("You cannot delete the last remaining project.", "danger")
+        return redirect(url_for("projects_view"))
+
+    db.execute("DELETE FROM projects WHERE id=?", (project_id,))
+    log_audit("Projects", "Deleted", f"Deleted project {project['project_code']}")
+    db.commit()
+    flash("Project deleted successfully.", "success")
+    return redirect(url_for("projects_view"))
 
 
 @app.route("/employees/bulk-upload", methods=["GET", "POST"])
