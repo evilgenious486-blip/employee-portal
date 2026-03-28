@@ -36,10 +36,10 @@
           </div>
           <div class="brand-copy">
             <div class="brand-title">{{ settings.company_name if settings else 'Pacost International' }}</div>
-            <div class="brand-subtitle">Employee Portal</div>
+            <div class="brand-subtitle">{{ current_user.project_name if current_user.project_name else 'Employee Portal' }}</div>
           </div>
         </div>
-        {% if current_user.role == 'admin' %}
+        {% if is_admin_role(current_user.role) %}
         <a class="superadmin-shortcut" href="{{ url_for('masters_view') }}">
           <i class="bi bi-stars"></i>
           <span>Super Admin</span>
@@ -56,7 +56,7 @@
           <div class="collapse show nav-group-menu" id="workspaceMenu">
             <a class="nav-item-link" href="{{ url_for('dashboard') }}"><i class="bi bi-grid-1x2-fill"></i><span>Dashboard</span></a>
             <a class="nav-item-link" href="{{ url_for('profile') }}"><i class="bi bi-person-badge-fill"></i><span>My Profile</span></a>
-            {% if current_user.role in ['employee', 'manager'] %}
+            {% if current_user.role == 'employee' %}
             <a class="nav-item-link" href="{{ url_for('apply_leave') }}"><i class="bi bi-send-check-fill"></i><span>Apply Leave</span></a>
             {% endif %}
             <a class="nav-item-link" href="{{ url_for('my_leaves') }}"><i class="bi bi-journal-check"></i><span>Leave Tracking</span></a>
@@ -67,7 +67,7 @@
           </div>
         </div>
 
-        {% if current_user.role in ['manager', 'hr', 'admin'] %}
+        {% if can_manage_people(current_user.role) %}
         <div class="nav-group">
           <button class="nav-group-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#managementMenu" aria-expanded="true" aria-controls="managementMenu">
             <span class="nav-section-title d-flex align-items-center gap-2 mb-0"><i class="bi bi-people"></i> Management</span>
@@ -75,14 +75,14 @@
           </button>
           <div class="collapse show nav-group-menu" id="managementMenu">
             <a class="nav-item-link" href="{{ url_for('team') }}"><i class="bi bi-people-fill"></i><span>Employees</span></a>
-            {% if current_user.role in ['hr', 'admin'] %}
+            {% if current_user.role in ['hr', 'admin', 'super_admin'] %}
             <a class="nav-item-link" href="{{ url_for('reports') }}"><i class="bi bi-bar-chart-line-fill"></i><span>Reports</span></a>
             {% endif %}
           </div>
         </div>
         {% endif %}
 
-        {% if current_user.role == 'admin' %}
+        {% if is_admin_role(current_user.role) %}
         <div class="nav-group">
           <button class="nav-group-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#adminToolsMenu" aria-expanded="true" aria-controls="adminToolsMenu">
             <span class="nav-section-title d-flex align-items-center gap-2 mb-0"><i class="bi bi-shield-lock"></i> Admin Tools</span>
@@ -90,6 +90,7 @@
           </button>
           <div class="collapse show nav-group-menu" id="adminToolsMenu">
             <a class="nav-item-link" href="{{ url_for('masters_view') }}"><i class="bi bi-stars"></i><span>Super Admin</span></a>
+            <a class="nav-item-link" href="{{ url_for('projects_view') }}"><i class="bi bi-diagram-3-fill"></i><span>Projects</span></a>
             <a class="nav-item-link" href="{{ url_for('new_employee') }}"><i class="bi bi-person-plus-fill"></i><span>Add Employee</span></a>
             <a class="nav-item-link" href="{{ url_for('bulk_employee_upload') }}"><i class="bi bi-file-earmark-arrow-up-fill"></i><span>Bulk Employee Add</span></a>
             <a class="nav-item-link" href="{{ url_for('calendar_view') }}"><i class="bi bi-calendar2-event-fill"></i><span>Calendar</span></a>
@@ -108,7 +109,7 @@
         {% endif %}
         <div>
           <div class="sidebar-user-name">{{ current_user.full_name }}</div>
-          <div class="sidebar-user-role">{{ current_user.role|capitalize }}</div>
+          <div class="sidebar-user-role">{{ role_label(current_user.role) }}</div>
         </div>
       </div>
     </aside>
@@ -121,7 +122,7 @@
           </button>
           <div>
             <div class="topbar-title">{{ title or 'Dashboard' }}</div>
-            <div class="topbar-subtitle">Pacost International internal workspace</div>
+            <div class="topbar-subtitle">Project-based employee workspace</div>
           </div>
         </div>
         <div class="topbar-right">

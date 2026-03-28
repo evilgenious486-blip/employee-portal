@@ -2,7 +2,7 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
   <h3 class="mb-0">Payslips</h3>
-  {% if current_user.role == 'admin' %}
+  {% if current_user.role in ['admin','super_admin'] %}
   <div class="d-flex gap-2"><a class="btn btn-primary" href="{{ url_for('payroll_add') }}">Add Payslip</a><a class="btn btn-outline-primary" href="{{ url_for('payroll_bulk_upload') }}">Bulk Upload</a><a class="btn btn-outline-dark" href="{{ url_for('payroll_generate_auto') }}">Auto Generate</a></div>
   {% endif %}
 </div>
@@ -16,6 +16,6 @@
 {% endif %}
 <div class="card border-0 shadow-sm rounded-4"><div class="card-body">
   <h5 class="mb-3">{{ selected_employee.full_name }} Payslips</h5>
-  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Month</th><th>Basic</th><th>Allowances</th><th>Deductions</th><th>Net Salary</th><th>Generated At</th>{% if current_user.role == 'admin' %}<th>Actions</th>{% endif %}</tr></thead><tbody>{% for row in slips %}<tr><td>{{ row.month_label }}</td><td>{{ row.basic_salary }}</td><td>{{ row.allowances }}</td><td>{{ row.deductions }}</td><td class="fw-semibold">{{ row.net_salary }}</td><td>{{ row.generated_at }}</td>{% if current_user.role == 'admin' %}<td class="text-nowrap"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('payroll_edit', slip_id=row.id) }}">Edit</a> <form method="post" action="{{ url_for('payroll_delete', slip_id=row.id) }}" class="d-inline" onsubmit="return confirm('Delete this payslip?');"><button class="btn btn-sm btn-outline-danger">Delete</button></form></td>{% endif %}</tr>{% else %}<tr><td colspan="{% if current_user.role == 'admin' %}7{% else %}6{% endif %}" class="text-center text-secondary py-4">No payslips found.</td></tr>{% endfor %}</tbody></table></div>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Month</th><th>Basic</th><th>Allowances</th><th>Deductions</th><th>Net Salary</th><th>Generated At</th>{% if current_user.role in ['admin','super_admin'] %}<th>Actions</th>{% endif %}</tr></thead><tbody>{% for row in slips %}<tr><td>{{ row.month_label }}</td><td>{{ row.basic_salary }}</td><td>{{ row.allowances }}</td><td>{{ row.deductions }}</td><td class="fw-semibold">{{ row.net_salary }}</td><td>{{ row.generated_at }}</td>{% if current_user.role in ['admin','super_admin'] %}<td class="text-nowrap"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('payroll_edit', slip_id=row.id) }}">Edit</a> <form method="post" action="{{ url_for('payroll_delete', slip_id=row.id) }}" class="d-inline" onsubmit="return confirm('Delete this payslip?');"><button class="btn btn-sm btn-outline-danger">Delete</button></form></td>{% endif %}</tr>{% else %}<tr><td colspan="{% if current_user.role in ['admin','super_admin'] %}7{% else %}6{% endif %}" class="text-center text-secondary py-4">No payslips found.</td></tr>{% endfor %}</tbody></table></div>
 </div></div>
 {% endblock %}

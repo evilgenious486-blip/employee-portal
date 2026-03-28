@@ -2,23 +2,82 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4 gap-3 flex-wrap">
   <div>
-    <h3 class="mb-0">Employees</h3>
-    <div class="text-secondary small">Search employees or add them one by one or in bulk.</div>
+    <h3 class="mb-0">Project Team Directory</h3>
+    <div class="text-secondary small">
+      {% if current_user.project_name and not is_admin_role(current_user.role) and current_user.role != 'hr' %}
+        Showing employees assigned to {{ current_user.project_name }} only.
+      {% else %}
+        Search and manage employees across projects.
+      {% endif %}
+    </div>
   </div>
   <div class="d-flex gap-2 flex-wrap align-items-center">
-    {% if current_user.role in ['hr','admin'] %}
+    {% if current_user.role in ['hr','admin','super_admin'] %}
     <a class="btn btn-primary" href="{{ url_for('new_employee') }}"><i class="bi bi-person-plus me-1"></i>Add Employee</a>
     <a class="btn btn-outline-primary" href="{{ url_for('bulk_employee_upload') }}"><i class="bi bi-file-earmark-arrow-up me-1"></i>Bulk Add</a>
     {% endif %}
-    <form class="d-flex gap-2" method="get">
-    <input class="form-control" name="q" placeholder="Search name, code, email" value="{{ search or '' }}">
-    <button class="btn btn-outline-primary">Search</button>
-  </form>
+    <form class="d-flex gap-2 flex-wrap" method="get">
+      {% if is_admin_role(current_user.role) or current_user.role == 'hr' %}
+      <select class="form-select" name="project_id" style="min-width:220px;">
+        <option value="">All Projects</option>
+        {% for project in projects %}
+        <option value="{{ project.id }}" {% if selected_project_id == project.id %}selected{% endif %}>{{ project.project_code }} · {{ project.project_name }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      <input class="form-control" name="q" placeholder="Search name, code, email, project" value="{{ search or '' }}">
+      <button class="btn btn-outline-primary">Search</button>
+    </form>
   </div>
 </div>
-<div class="card border-0 shadow-sm rounded-4"><div class="card-body">
-  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Name</th><th>Employee Code</th><th>Department</th><th>Designation</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>
-    {% for row in employees %}<tr><td>{{ row.full_name }}</td><td>{{ row.employee_code }}</td><td>{{ row.department_name or '-' }}</td><td>{{ row.designation_name or '-' }}</td><td>{{ row.role|capitalize }}</td><td><span class="badge text-bg-light border">{{ 'Active' if row.is_active else 'Inactive' }}</span></td><td class="text-nowrap"><a href="{{ url_for('employee_detail', user_id=row.id) }}" class="btn btn-sm btn-outline-primary">Open</a> {% if current_user.role in ['hr','admin'] %}<a href="{{ url_for('edit_employee', user_id=row.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>{% endif %} {% if current_user.role == 'admin' and row.id != current_user.id %}<form method="post" action="{{ url_for('hard_delete_employee', user_id=row.id) }}" class="d-inline" onsubmit="return confirm('Permanently delete this employee and related records?');"><button class="btn btn-sm btn-outline-danger">Delete</button></form>{% endif %}</td></tr>{% else %}<tr><td colspan="7" class="text-center text-secondary py-4">No employees found.</td></tr>{% endfor %}
-  </tbody></table></div>
-</div></div>
+
+<div class="card border-0 shadow-sm rounded-4">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Employee Code</th>
+            <th>Project</th>
+            <th>Department</th>
+            <th>Designation</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in employees %}
+          <tr>
+            <td>
+              <div class="fw-semibold">{{ row.full_name }}</div>
+              <div class="small text-secondary">{{ row.email }}</div>
+            </td>
+            <td>{{ row.employee_code }}</td>
+            <td>
+              {% if row.project_name %}
+                <div class="fw-semibold">{{ row.project_name }}</div>
+                <div class="small text-secondary">{{ row.project_code }}</div>
+              {% else %}-{% endif %}
+            </td>
+            <td>{{ row.department_name or '-' }}</td>
+            <td>{{ row.designation_name or '-' }}</td>
+            <td>{{ role_label(row.role) }}</td>
+            <td><span class="badge text-bg-light border">{{ 'Active' if row.is_active else 'Inactive' }}</span></td>
+            <td class="text-nowrap">
+              <a href="{{ url_for('employee_detail', user_id=row.id) }}" class="btn btn-sm btn-outline-primary">Open</a>
+              {% if current_user.role in ['hr','admin','super_admin'] %}
+              <a href="{{ url_for('edit_employee', user_id=row.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="text-center text-secondary py-4">No employees found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endblock %}
