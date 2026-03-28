@@ -2,47 +2,76 @@
 {% set title = "Login" %}
 
 {% block public_content %}
-<div class="container-fluid min-vh-100 d-flex align-items-center justify-content-center py-4" style="background:#f3f5f9;">
-  <div class="row g-0 shadow rounded-4 overflow-hidden" style="max-width:1100px; width:100%; background:#ffffff; min-height:680px;">
+<div class="container-fluid min-vh-100 d-flex align-items-center justify-content-center py-4 py-lg-5" style="background:linear-gradient(135deg,#eef2f7 0%,#f7f9fc 100%);">
+  <div class="row g-0 rounded-4 overflow-hidden shadow-lg" style="max-width:1180px; width:100%; background:#ffffff; min-height:720px; box-shadow:0 24px 70px rgba(15,23,42,.14) !important;">
 
-    <div class="col-lg-6 d-none d-lg-flex flex-column justify-content-center p-5 text-white" style="background:linear-gradient(180deg,#162844 0%,#243b63 100%);">
-      <div class="mb-4">
-        <img src="{{ url_for('static', filename='images/pacost_logo.png') }}" alt="Pacost Logo" style="max-width:180px; height:auto; background:#fff; padding:10px; border-radius:12px;">
+    <div class="col-lg-6 d-none d-lg-flex flex-column justify-content-between p-5 text-white position-relative"
+         style="background:linear-gradient(160deg,#132742 0%,#1d3760 55%,#294879 100%);">
+      <div>
+        <div class="d-inline-flex align-items-center justify-content-center mb-5"
+             style="width:220px; min-height:120px; background:rgba(255,255,255,.97); border-radius:22px; padding:22px; box-shadow:0 10px 28px rgba(0,0,0,.16);">
+          <img src="{{ url_for('static', filename='images/pacost_logo.png') }}"
+               alt="Pacost Logo"
+               style="max-width:100%; max-height:72px; width:auto; height:auto; object-fit:contain; display:block;">
+        </div>
+
+        <div style="font-size:12px; letter-spacing:2.6px; opacity:.78; margin-bottom:18px; font-weight:600;">
+          PACOST INTERNATIONAL
+        </div>
+
+        <h1 style="font-size:48px; line-height:1.12; font-weight:800; margin-bottom:20px; max-width:520px;">
+          Modern employee access in one secure portal.
+        </h1>
+
+        <p style="font-size:17px; line-height:1.85; opacity:.92; max-width:500px; margin-bottom:34px;">
+          Manage attendance, leave, payroll, documents, approvals, and employee workflows from one clean and professional platform.
+        </p>
+
+        <div style="display:grid; gap:16px; max-width:500px;">
+          <div style="display:flex; align-items:flex-start; gap:12px; font-size:16px; line-height:1.6;">
+            <span style="display:inline-flex; align-items:center; justify-content:center; min-width:28px; height:28px; border-radius:50%; background:rgba(255,255,255,.14); font-weight:700;">✓</span>
+            <span>Role-based secure access for HR, managers, engineers, and employees</span>
+          </div>
+          <div style="display:flex; align-items:flex-start; gap:12px; font-size:16px; line-height:1.6;">
+            <span style="display:inline-flex; align-items:center; justify-content:center; min-width:28px; height:28px; border-radius:50%; background:rgba(255,255,255,.14); font-weight:700;">✓</span>
+            <span>Attendance, payroll, approvals, and document workflows in one place</span>
+          </div>
+          <div style="display:flex; align-items:flex-start; gap:12px; font-size:16px; line-height:1.6;">
+            <span style="display:inline-flex; align-items:center; justify-content:center; min-width:28px; height:28px; border-radius:50%; background:rgba(255,255,255,.14); font-weight:700;">✓</span>
+            <span>Responsive experience for desktop and mobile devices</span>
+          </div>
+        </div>
       </div>
 
-      <div style="font-size:12px; letter-spacing:2px; opacity:.8; margin-bottom:14px;">
-        PACOST INTERNATIONAL
-      </div>
-
-      <h1 style="font-size:40px; line-height:1.15; font-weight:800; margin-bottom:18px;">
-        Smart access for HR, managers, and employees.
-      </h1>
-
-      <p style="font-size:16px; line-height:1.7; opacity:.9; max-width:470px; margin-bottom:28px;">
-        Track leave, attendance, payroll, documents, and approvals from one clean and practical portal.
-      </p>
-
-      <div style="font-size:16px; line-height:2;">
-        <div>✓ Role based secure access</div>
-        <div>✓ Attendance, payroll, and document workflows</div>
-        <div>✓ Works on web and mobile app</div>
+      <div style="margin-top:40px; font-size:13px; opacity:.7; letter-spacing:.5px;">
+        Excellence Endures
       </div>
     </div>
 
-    <div class="col-lg-6 d-flex align-items-center">
-      <div class="w-100 p-4 p-md-5" style="max-width:480px; margin:0 auto;">
-        <h2 style="font-size:34px; font-weight:800; color:#1b2a44; margin-bottom:8px;">
-          Sign in
-        </h2>
+    <div class="col-lg-6 d-flex align-items-center" style="background:#ffffff;">
+      <div class="w-100 px-4 px-md-5 py-5" style="max-width:500px; margin:0 auto;">
+        <div class="d-lg-none text-center mb-4">
+          <img src="{{ url_for('static', filename='images/pacost_logo.png') }}" alt="Pacost Logo" style="max-width:150px; height:auto;">
+        </div>
 
-        <p style="font-size:15px; color:#6b7280; margin-bottom:26px;">
-          Use email address or employee code.
-        </p>
+        <div class="mb-4">
+          <div style="display:inline-flex; align-items:center; gap:8px; padding:6px 12px; background:#f3f7fc; color:#36527a; border-radius:999px; font-size:13px; font-weight:600; margin-bottom:18px;">
+            Secure employee portal
+          </div>
+
+          <h2 style="font-size:40px; font-weight:800; color:#162844; margin-bottom:10px; letter-spacing:-.5px;">
+            Sign in
+          </h2>
+
+          <p style="font-size:16px; color:#6b7280; margin-bottom:0; line-height:1.7;">
+            Enter employee email or code and password to continue.
+          </p>
+        </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
             {% for category, message in messages %}
-              <div class="alert {% if category == 'success' %}alert-success{% elif category == 'warning' %}alert-warning{% else %}alert-light border{% endif %} rounded-3 mb-3" role="alert" style="font-size:15px;">
+              <div class="alert {% if category == 'success' %}alert-success{% elif category == 'warning' %}alert-warning{% else %}alert-light border{% endif %} rounded-4 mb-3" role="alert" style="font-size:15px; padding:14px 16px;">
                 {{ message }}
               </div>
             {% endfor %}
@@ -50,28 +79,29 @@
         {% endwith %}
 
         {% if error %}
-          <div class="alert alert-danger rounded-3 mb-3" role="alert" style="font-size:15px;">
+          <div class="alert alert-danger rounded-4 mb-3" role="alert" style="font-size:15px; padding:14px 16px;">
             {{ error }}
           </div>
         {% endif %}
 
         <form method="POST" action="{{ url_for('login') }}">
           <div class="mb-3">
-            <label for="identifier" class="form-label" style="font-size:15px; font-weight:600; color:#374151;">
+            <label for="identifier" class="form-label" style="font-size:15px; font-weight:700; color:#334155; margin-bottom:10px;">
               Email or Employee Code
             </label>
             <input
-  type="text"
-  class="form-control form-control-lg"
-  id="identifier"
-  name="identifier"
-  required
-  style="height:58px; font-size:16px; border-radius:12px;"
->            
+              type="text"
+              class="form-control form-control-lg"
+              id="identifier"
+              name="identifier"
+              required
+              autocomplete="username"
+              style="height:60px; font-size:16px; border-radius:16px; border:1px solid #dbe4f0; background:#fbfcfe; padding:0 18px; box-shadow:none;"
+            >
           </div>
 
           <div class="mb-2">
-            <label for="password" class="form-label" style="font-size:15px; font-weight:600; color:#374151;">
+            <label for="password" class="form-label" style="font-size:15px; font-weight:700; color:#334155; margin-bottom:10px;">
               Password
             </label>
             <input
@@ -81,18 +111,19 @@
               name="password"
               placeholder="Enter password"
               required
-              style="height:58px; font-size:16px; border-radius:12px;"
+              autocomplete="current-password"
+              style="height:60px; font-size:16px; border-radius:16px; border:1px solid #dbe4f0; background:#fbfcfe; padding:0 18px; box-shadow:none;"
             >
           </div>
 
-          <div class="d-flex justify-content-end mb-4">
-            <a href="{{ url_for('forgot_password') }}" style="font-size:14px; text-decoration:none;">Forgot password?</a>
+          <div class="d-flex justify-content-end align-items-center mb-4 mt-2">
+            <a href="{{ url_for('forgot_password') }}" style="font-size:14px; font-weight:600; color:#3366cc; text-decoration:none;">Forgot password?</a>
           </div>
 
           <button
             type="submit"
             class="btn w-100"
-            style="height:56px; font-size:18px; font-weight:600; background:#f58220; color:#fff; border:none; border-radius:12px;"
+            style="height:58px; font-size:18px; font-weight:700; background:linear-gradient(135deg,#f58220 0%,#f97316 100%); color:#fff; border:none; border-radius:16px; box-shadow:0 12px 26px rgba(245,130,32,.28);"
           >
             Login to Portal
           </button>
