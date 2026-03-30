@@ -343,10 +343,62 @@ def close_db(exception: Exception | None) -> None:
 def init_db() -> None:
     schema = BASE_DIR / "schema.sql"
     with closing(sqlite3.connect(DATABASE)) as db:
+        db.row_factory = sqlite3.Row
         with open(schema, "r", encoding="utf-8") as f:
             db.executescript(f.read())
         db.commit()
     seed_data()
+
+
+def bootstrap_database() -> None:
+    DATABASE.parent.mkdir(parents=True, exist_ok=True)
+    required_tables = {
+        "users",
+        "departments",
+        "designations",
+        "leave_types",
+        "leave_balances",
+        "leave_applications",
+        "leave_history",
+        "attendance",
+        "payroll_slips",
+        "notifications",
+        "audit_logs",
+        "email_queue",
+        "employee_documents",
+        "projects",
+        "company_settings",
+    }
+
+    needs_schema = False
+    needs_seed = False
+
+    with closing(sqlite3.connect(DATABASE)) as db:
+        db.row_factory = sqlite3.Row
+        existing_tables = {
+            row["name"]
+            for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+
+        if not required_tables.issubset(existing_tables):
+            schema = BASE_DIR / "schema.sql"
+            if not schema.exists():
+                raise RuntimeError(f"schema.sql not found at {schema}")
+            with open(schema, "r", encoding="utf-8") as f:
+                db.executescript(f.read())
+            db.commit()
+            needs_schema = True
+
+        ensure_schema(db)
+        user_table = db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
+        ).fetchone()
+        if user_table:
+            user_count = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+            needs_seed = user_count == 0
+
+    if needs_schema or needs_seed:
+        seed_data()
 
 
 def allowed_file(filename: str) -> bool:
@@ -2206,11 +2258,12 @@ def uploaded_file(filename: str):
 
 @app.route("/initdb")
 def initialize_database():
-    init_db()
+    bootstrap_database()
     return "Database initialized successfully."
 
 
+bootstrap_database()
+
+
 if __name__ == "__main__":
-    if not DATABASE.exists():
-        init_db()
     app.run(debug=True)
