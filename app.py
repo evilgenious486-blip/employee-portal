@@ -1,4 +1,3 @@
-# FIX_MARKER_LEAVE_CHAIN_20260404_1455
 from __future__ import annotations
 
 import os
@@ -209,7 +208,6 @@ def get_role_options() -> list[str]:
         "site_manager",
         "project_engineer",
         "project_manager",
-        "operation_manager",
         "manager",
         "hr",
         "admin",
@@ -253,6 +251,25 @@ def can_manage_people(role: str | None) -> bool:
     return role in TEAM_ACCESS_ROLES
 
 
+def effective_workflow_role(user: sqlite3.Row | dict[str, Any] | None) -> str | None:
+    if not user:
+        return None
+    role = user.get("role") if hasattr(user, "get") else user["role"]
+    designation = ""
+    try:
+        designation = ((user.get("designation_name") if hasattr(user, "get") else user["designation_name"]) or "").strip().lower()
+    except Exception:
+        designation = ""
+    if role == "manager":
+        if designation == "operation manager":
+            return "operation_manager"
+        if designation == "project manager":
+            return "project_manager"
+        if designation == "site manager":
+            return "site_manager"
+    return role
+
+
 LEAVE_APPROVAL_STAGES = [
     {"stage": "engineer_review", "roles": {"engineer"}, "status": "Pending Engineer Approval", "approved_action": "Engineer Approved", "rejected_status": "Rejected by Engineer"},
     {"stage": "site_manager_review", "roles": {"site_manager"}, "status": "Pending Site Manager Approval", "approved_action": "Site Manager Approved", "rejected_status": "Rejected by Site Manager"},
@@ -291,30 +308,41 @@ def get_initial_leave_stage_start_index(role: str | None) -> int:
 
 
 def find_leave_approver(db, applicant_user_id: int, roles: set[str]):
-    applicant = db.execute("SELECT id, project_id FROM users WHERE id=?", (applicant_user_id,)).fetchone()
+    applicant = db.execute(
+        "SELECT u.*, ds.name AS designation_name FROM users u LEFT JOIN designations ds ON u.designation_id=ds.id WHERE u.id=?",
+        (applicant_user_id,),
+    ).fetchone()
     project_id = applicant["project_id"] if applicant else None
-    role_list = sorted(roles)
-    placeholders = ", ".join(["?"] * len(role_list))
+
+    def row_matches(user_row):
+        return effective_workflow_role(user_row) in roles
 
     if roles.intersection({"hr", "admin", "super_admin"}):
-        return db.execute(
-            f"SELECT * FROM users WHERE is_active=1 AND role IN ({placeholders}) ORDER BY CASE role WHEN 'hr' THEN 0 WHEN 'admin' THEN 1 WHEN 'super_admin' THEN 2 ELSE 3 END, id LIMIT 1",
-            tuple(role_list),
-        ).fetchone()
+        candidates = db.execute(
+            "SELECT u.*, ds.name AS designation_name FROM users u LEFT JOIN designations ds ON u.designation_id=ds.id WHERE u.is_active=1 ORDER BY u.id"
+        ).fetchall()
+        for row in candidates:
+            if row_matches(row):
+                return row
+        return None
 
     if project_id:
-        approver = db.execute(
-            f"SELECT * FROM users WHERE is_active=1 AND project_id=? AND id<>? AND role IN ({placeholders}) ORDER BY id LIMIT 1",
-            tuple([project_id, applicant_user_id] + role_list),
-        ).fetchone()
-        if approver:
-            return approver
+        candidates = db.execute(
+            "SELECT u.*, ds.name AS designation_name FROM users u LEFT JOIN designations ds ON u.designation_id=ds.id WHERE u.is_active=1 AND u.project_id=? AND u.id<>? ORDER BY u.id",
+            (project_id, applicant_user_id),
+        ).fetchall()
+        for row in candidates:
+            if row_matches(row):
+                return row
 
     if roles.intersection({"operation_manager", "manager"}):
-        return db.execute(
-            f"SELECT * FROM users WHERE is_active=1 AND id<>? AND role IN ({placeholders}) ORDER BY CASE role WHEN 'operation_manager' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END, id LIMIT 1",
-            tuple([applicant_user_id] + role_list),
-        ).fetchone()
+        candidates = db.execute(
+            "SELECT u.*, ds.name AS designation_name FROM users u LEFT JOIN designations ds ON u.designation_id=ds.id WHERE u.is_active=1 AND u.id<>? ORDER BY u.id",
+            (applicant_user_id,),
+        ).fetchall()
+        for row in candidates:
+            if row_matches(row):
+                return row
 
     return None
 
@@ -328,15 +356,31 @@ def resolve_next_leave_stage(db, applicant_user_id: int, start_index: int = 0):
     return None, None, None
 
 
+def leave_visibility_filter(user: sqlite3.Row, alias: str = "u") -> tuple[str, list[Any]]:
+    role = effective_workflow_role(user)
+    if role == "employee":
+        return f"{alias}.id = ?", [user["id"]]
+    if role in {"engineer", "site_manager", "project_engineer", "project_manager"}:
+        if user["project_id"]:
+            return f"({alias}.project_id = ? OR {alias}.id = ?)", [user["project_id"], user["id"]]
+        return f"{alias}.id = ?", [user["id"]]
+    if role in {"operation_manager", "manager"}:
+        if user["project_id"]:
+            return f"({alias}.project_id = ? OR {alias}.id = ?)", [user["project_id"], user["id"]]
+        return "1=1", []
+    return "1=1", []
+
+
 def can_user_approve_leave(user: sqlite3.Row, leave, applicant_project_id: int | None) -> bool:
-    stage_meta = get_leave_stage_meta(leave.get("current_stage"))
+    stage_meta = get_leave_stage_meta(leave["current_stage"])
     if not stage_meta:
         return False
     if leave["user_id"] == user["id"]:
         return False
-    if user["role"] not in stage_meta["roles"]:
+    normalized_role = effective_workflow_role(user)
+    if normalized_role not in stage_meta["roles"]:
         return False
-    if user["role"] in {"hr", "admin", "super_admin", "operation_manager", "manager"}:
+    if normalized_role in {"hr", "admin", "super_admin", "operation_manager", "manager"}:
         return True
     return bool(user["project_id"] and applicant_project_id and user["project_id"] == applicant_project_id)
 
@@ -346,9 +390,7 @@ def role_label(role: str | None) -> str:
         "admin": "Super Admin",
         "super_admin": "Super Admin",
         "manager": "Manager",
-        "operation_manager": "Operation Manager",
         "project_manager": "Project Manager",
-        "project_engineer": "Project Engineer",
         "site_manager": "Site Manager",
         "engineer": "Engineer",
         "employee": "Employee",
@@ -651,7 +693,7 @@ def seed_data(db=None) -> None:
             "email": "projectmanager@example.com",
             "employee_code": "PAC-PM-001",
             "password": "Hamid@123",
-            "role": "manager",
+            "role": "project_manager",
             "department": "Project Management",
             "designation": "Project Manager",
             "manager_email": None,
@@ -665,7 +707,7 @@ def seed_data(db=None) -> None:
             "email": "opmanager@example.com",
             "employee_code": "PAC-OPS-001",
             "password": "Operation@123",
-            "role": "manager",
+            "role": "operation_manager",
             "department": "Operations",
             "designation": "Operation Manager",
             "manager_email": "projectmanager@example.com",
@@ -679,7 +721,7 @@ def seed_data(db=None) -> None:
             "email": "manager@example.com",
             "employee_code": "PAC-249",
             "password": "Muhammad@123",
-            "role": "manager",
+            "role": "site_manager",
             "department": "Electrical",
             "designation": "Site Manager",
             "manager_email": "opmanager@example.com",
@@ -1239,7 +1281,7 @@ def apply_leave():
         next_num = db.execute("SELECT COUNT(*) AS c FROM leave_applications").fetchone()["c"] + 1
         app_no = f"LV-2026-{next_num:04d}"
 
-        start_index = get_initial_leave_stage_start_index(user["role"])
+        start_index = get_initial_leave_stage_start_index(effective_workflow_role(user))
         _, first_stage, first_approver = resolve_next_leave_stage(db, user["id"], start_index)
         if not first_stage or not first_approver:
             flash("No approver is configured for the next leave approval stage. Please contact HR or Admin.", "danger")
@@ -1300,16 +1342,10 @@ def my_leaves():
     conditions = []
     params: list[Any] = []
 
-    if user["role"] == "employee":
-        conditions.append("la.user_id = ?")
-        params.append(user["id"])
-    elif is_project_scoped_role(user["role"]):
-        if user["project_id"]:
-            conditions.append("(u.project_id = ? OR la.user_id = ?)")
-            params.extend([user["project_id"], user["id"]])
-        else:
-            conditions.append("la.user_id = ?")
-            params.append(user["id"])
+    where_clause, where_params = leave_visibility_filter(user, "u")
+    if where_clause != "1=1":
+        conditions.append(where_clause)
+        params.extend(where_params)
 
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
@@ -1332,10 +1368,16 @@ def leave_detail(leave_id: int):
         flash("Leave application not found.", "danger")
         return redirect(url_for("my_leaves"))
 
-    can_view = is_hr_role(user["role"]) or is_admin_role(user["role"]) or leave["user_id"] == user["id"] or (
-        is_project_scoped_role(user["role"]) and user["project_id"] and user["project_id"] == leave["applicant_project_id"]
-    ) or user["role"] in {"project_engineer", "operation_manager", "manager"}
-    if not can_view:
+    where_clause, where_params = leave_visibility_filter(user, "u")
+    if where_clause == "1=1":
+        can_view = True
+    else:
+        can_view = db.execute(
+            f"SELECT 1 AS ok FROM users u WHERE u.id=? AND {where_clause}",
+            tuple([leave["user_id"]] + where_params),
+        ).fetchone() is not None
+
+    if not can_view and effective_workflow_role(user) not in {"project_engineer", "operation_manager", "manager"} and not is_hr_role(user["role"]) and not is_admin_role(user["role"]):
         flash("You do not have access to this record.", "danger")
         return redirect(url_for("my_leaves"))
 
@@ -1412,7 +1454,6 @@ def leave_detail(leave_id: int):
             return redirect(url_for("leave_detail", leave_id=leave_id))
     history = db.execute("SELECT lh.*, u.full_name FROM leave_history lh LEFT JOIN users u ON lh.action_by=u.id WHERE lh.leave_application_id=? ORDER BY lh.id ASC", (leave_id,)).fetchall()
     return render_template("leave_detail.html", leave=leave, history=history, can_act=can_act, stage_meta=stage_meta)
-
 
 @app.route("/team")
 @login_required
