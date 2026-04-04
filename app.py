@@ -118,6 +118,20 @@ def get_raw_connection():
     return psycopg2.connect(DATABASE_URL)
 
 
+def get_db():
+    if "db" not in g:
+        raw_conn = get_raw_connection()
+        g.db = PGConnectionWrapper(raw_conn)
+    return g.db
+
+
+@app.teardown_appcontext
+def close_db(exception=None):
+    db = g.pop("db", None)
+    if db is not None:
+        db.close()
+
+
 ADMIN_ROLES = {"admin", "super_admin"}
 HR_ROLES = {"hr"}
 PROJECT_LEAD_ROLES = {"manager", "project_manager", "site_manager", "engineer"}

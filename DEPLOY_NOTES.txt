@@ -1,12 +1,17 @@
+Final fixes in this ZIP:
+1. Restored the missing get_db() function and close_db() teardown in app.py.
+2. Included a safe PostgreSQL schema.sql for Neon.
+3. Included requirements.txt with psycopg2-binary.
+
 Replace these files in your project:
 - app.py
 - schema.sql
 - requirements.txt
 
-Render:
-- Environment variable DATABASE_URL must already be set to your Neon connection string
-- Start command: gunicorn app:app
+Then run:
+git add .
+git commit -m "Fix get_db and Neon schema"
+git push
 
-Important:
-- Database data will be stored in Neon and remain permanent.
-- Local uploaded files in the uploads folder are still stored on Render's local disk, so uploaded files may still disappear on Render Free restarts.
+After push:
+- Render -> Manual Deploy -> Deploy latest commit
