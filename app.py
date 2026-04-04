@@ -1169,6 +1169,7 @@ def apply_leave():
 
 
 @app.route("/leaves")
+@app.route("/leave-tracking")
 @login_required
 def my_leaves():
     user = current_user()
@@ -1183,7 +1184,7 @@ def my_leaves():
         params = (user["project_id"],)
     query += " ORDER BY la.id DESC"
     leaves = db.execute(query, params).fetchall()
-    return render_template("leaves.html", leaves=leaves)
+    return render_template("leaves.html", leaves=leaves, page_title="Leave Tracking")
 
 
 @app.route("/leave/<int:leave_id>", methods=["GET", "POST"])
