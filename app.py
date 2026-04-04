@@ -4,6 +4,8 @@ import os
 import secrets
 import sqlite3
 from contextlib import closing
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from datetime import date, datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -16,17 +18,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
 BASE_DIR = Path(__file__).resolve().parent
-
-# Render free services use an ephemeral filesystem. To keep SQLite data and uploads
-# after restarts, mount a persistent disk and point APP_DATA_DIR to that mount path
-# (for example: /var/data/employee_portal). If no persistent path is available, the
-# app falls back to the project directory.
-DEFAULT_DATA_DIR = Path("/var/data/employee_portal") if Path("/var/data").exists() else BASE_DIR
-DATA_DIR = Path(os.environ.get("APP_DATA_DIR", str(DEFAULT_DATA_DIR)))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-DATABASE = DATA_DIR / "employee_portal.db"
-UPLOAD_FOLDER = DATA_DIR / "uploads"
+DATABASE_URL = os.environ.get("DATABASE_URL")
+UPLOAD_FOLDER = BASE_DIR / "uploads"
 ALLOWED_EXTENSIONS = {"pdf", "png", "jpg", "jpeg", "doc", "docx", "xlsx"}
 ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg"}
 
@@ -34,6 +27,96 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-this-secret-key")
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
 UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set")
+
+
+class _LastInsertRow:
+    def __init__(self, value: int | None):
+        self._value = value
+
+    def fetchone(self):
+        return {"id": self._value}
+
+    def fetchall(self):
+        return [{"id": self._value}] if self._value is not None else []
+
+
+class PGCursorWrapper:
+    def __init__(self, cursor):
+        self.cursor = cursor
+
+    def fetchone(self):
+        try:
+            return self.cursor.fetchone()
+        except Exception:
+            return None
+
+    def fetchall(self):
+        try:
+            return self.cursor.fetchall()
+        except Exception:
+            return []
+
+    def __iter__(self):
+        try:
+            return iter(self.cursor)
+        except Exception:
+            return iter(())
+
+
+class PGConnectionWrapper:
+    def __init__(self, conn):
+        self.conn = conn
+        self.last_insert_id: int | None = None
+
+    def _translate_query(self, query: str) -> str:
+        q = query.replace("?", "%s")
+        q = q.replace("ifnull(", "COALESCE(")
+        return q
+
+    def execute(self, query, params=()):
+        normalized = query.strip()
+        if normalized.lower().startswith("select last_insert_rowid()"):
+            return _LastInsertRow(self.last_insert_id)
+
+        q = self._translate_query(query)
+        cur = self.conn.cursor(cursor_factory=RealDictCursor)
+
+        if normalized.lower().startswith("insert into ") and " returning " not in normalized.lower():
+            q = q.rstrip().rstrip(";") + " RETURNING id"
+            cur.execute(q, params)
+            inserted = cur.fetchone()
+            self.last_insert_id = inserted["id"] if inserted else None
+            return PGCursorWrapper(cur)
+
+        cur.execute(q, params)
+        return PGCursorWrapper(cur)
+
+    def executemany(self, query, seq_of_params):
+        cur = self.conn.cursor()
+        cur.executemany(self._translate_query(query), seq_of_params)
+        return cur
+
+    def executescript(self, script):
+        cur = self.conn.cursor()
+        cur.execute(script)
+        return cur
+
+    def commit(self):
+        self.conn.commit()
+
+    def rollback(self):
+        self.conn.rollback()
+
+    def close(self):
+        self.conn.close()
+
+
+def get_raw_connection():
+    return psycopg2.connect(DATABASE_URL)
+
 
 ADMIN_ROLES = {"admin", "super_admin"}
 HR_ROLES = {"hr"}
@@ -168,246 +251,21 @@ def calculate_hours(check_in: str | None, check_out: str | None) -> float:
 
 
 
-def ensure_schema(db: sqlite3.Connection) -> None:
-    db.execute("""CREATE TABLE IF NOT EXISTS projects (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        project_code TEXT NOT NULL UNIQUE,
-        project_name TEXT NOT NULL,
-        location TEXT,
-        client_name TEXT,
-        status TEXT NOT NULL DEFAULT 'Active',
-        start_date TEXT,
-        end_date TEXT,
-        created_by INTEGER,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (created_by) REFERENCES users (id)
-    )""")
-    project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
-    if "project_code" not in project_cols:
-        db.execute("ALTER TABLE projects ADD COLUMN project_code TEXT")
-        rows = db.execute("SELECT id, project_name FROM projects ORDER BY id").fetchall()
-        for row in rows:
-            code = f"PRJ-{row['id']:03d}"
-            db.execute("UPDATE projects SET project_code=? WHERE id=?", (code, row["id"]))
-        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
-    if "location" not in project_cols:
-        db.execute("ALTER TABLE projects ADD COLUMN location TEXT")
-        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
-    if "client_name" not in project_cols:
-        db.execute("ALTER TABLE projects ADD COLUMN client_name TEXT")
-        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
-    if "status" not in project_cols:
-        db.execute("ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'Active'")
-        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
-    if "start_date" not in project_cols:
-        db.execute("ALTER TABLE projects ADD COLUMN start_date TEXT")
-        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
-    if "end_date" not in project_cols:
-        db.execute("ALTER TABLE projects ADD COLUMN end_date TEXT")
-        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
-    if "created_by" not in project_cols:
-        db.execute("ALTER TABLE projects ADD COLUMN created_by INTEGER")
-        project_cols = {row[1] for row in db.execute("PRAGMA table_info(projects)").fetchall()}
-    if "created_at" not in project_cols:
-        db.execute("ALTER TABLE projects ADD COLUMN created_at TEXT")
-        db.execute("UPDATE projects SET created_at=? WHERE created_at IS NULL", (now_str(),))
-
-    db.execute("""CREATE TABLE IF NOT EXISTS company_settings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        company_name TEXT NOT NULL DEFAULT 'Pacost International',
-        leave_workflow TEXT NOT NULL DEFAULT 'Supervisor → Department Engineer → Site Manager → Project Engineer → Project Manager → HR',
-        default_working_hours REAL NOT NULL DEFAULT 8,
-        allow_document_upload INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )""")
-    users_sql_row = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
-    users_sql = users_sql_row[0] if users_sql_row else ''
-    if users_sql and "CHECK(role IN ('employee', 'manager', 'hr', 'admin'))" in users_sql:
-        db.executescript("""
-            PRAGMA foreign_keys=OFF;
-            CREATE TABLE users_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                full_name TEXT NOT NULL,
-                email TEXT NOT NULL UNIQUE,
-                employee_code TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL,
-                department_id INTEGER,
-                designation_id INTEGER,
-                manager_id INTEGER,
-                project_id INTEGER,
-                phone TEXT,
-                address TEXT,
-                emergency_contact TEXT,
-                join_date TEXT,
-                monthly_basic REAL NOT NULL DEFAULT 0,
-                default_allowances REAL NOT NULL DEFAULT 0,
-                deduction_per_absent REAL NOT NULL DEFAULT 0,
-                deduction_per_late REAL NOT NULL DEFAULT 0,
-                is_active INTEGER NOT NULL DEFAULT 1,
-                avatar_filename TEXT,
-                FOREIGN KEY (department_id) REFERENCES departments (id),
-                FOREIGN KEY (designation_id) REFERENCES designations (id),
-                FOREIGN KEY (manager_id) REFERENCES users_new (id),
-                FOREIGN KEY (project_id) REFERENCES projects (id)
-            );
-            INSERT INTO users_new(id, full_name, email, employee_code, password_hash, role, department_id, designation_id, manager_id, project_id, phone, address, emergency_contact, join_date, monthly_basic, default_allowances, deduction_per_absent, deduction_per_late, is_active, avatar_filename)
-            SELECT id, full_name, email, employee_code, password_hash, role, department_id, designation_id, manager_id, project_id, phone, address, emergency_contact, join_date, COALESCE(monthly_basic,0), COALESCE(default_allowances,0), COALESCE(deduction_per_absent,0), COALESCE(deduction_per_late,0), COALESCE(is_active,1), avatar_filename
-            FROM users;
-            DROP TABLE users;
-            ALTER TABLE users_new RENAME TO users;
-            PRAGMA foreign_keys=ON;
-        """)
-    user_cols = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
-    if "monthly_basic" not in user_cols:
-        db.execute("ALTER TABLE users ADD COLUMN monthly_basic REAL NOT NULL DEFAULT 0")
-        db.execute("ALTER TABLE users ADD COLUMN default_allowances REAL NOT NULL DEFAULT 0")
-        db.execute("ALTER TABLE users ADD COLUMN deduction_per_absent REAL NOT NULL DEFAULT 0")
-        db.execute("ALTER TABLE users ADD COLUMN deduction_per_late REAL NOT NULL DEFAULT 0")
-        user_cols = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
-    if "avatar_filename" not in user_cols:
-        db.execute("ALTER TABLE users ADD COLUMN avatar_filename TEXT")
-        user_cols = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
-    if "project_id" not in user_cols:
-        db.execute("ALTER TABLE users ADD COLUMN project_id INTEGER")
-        user_cols = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
-    attendance_cols = {row[1] for row in db.execute("PRAGMA table_info(attendance)").fetchall()}
-    if "ot_hours" not in attendance_cols:
-        db.execute("ALTER TABLE attendance ADD COLUMN ot_hours REAL NOT NULL DEFAULT 0")
-    db.execute("""CREATE TABLE IF NOT EXISTS holiday_calendar (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        holiday_date TEXT NOT NULL UNIQUE,
-        title TEXT NOT NULL,
-        holiday_type TEXT NOT NULL DEFAULT 'Holiday',
-        created_at TEXT NOT NULL
-    )""")
-    default_project = db.execute("SELECT id FROM projects ORDER BY id LIMIT 1").fetchone()
-    if not default_project:
-        db.execute(
-            "INSERT INTO projects(project_code, project_name, location, client_name, status, start_date, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("PRJ-001", "Al Nahda Project", "Dammam", "Pacost", "Active", date.today().isoformat(), None, now_str()),
-        )
-        default_project = db.execute("SELECT id FROM projects ORDER BY id LIMIT 1").fetchone()
-    if default_project:
-        db.execute("UPDATE users SET project_id=? WHERE project_id IS NULL", (default_project["id"],))
-    db.commit()
-
-
-def get_role_options() -> list[str]:
-    return ["employee", "engineer", "site_manager", "project_manager", "hr", "super_admin"]
-
-
-def get_holiday_row(db: sqlite3.Connection, attendance_date: str | None):
-    if not attendance_date:
-        return None
-    return db.execute("SELECT * FROM holiday_calendar WHERE holiday_date=?", (attendance_date,)).fetchone()
-
-
-def compute_ot_hours(db: sqlite3.Connection, attendance_date: str | None, status: str, hours_worked: float, manual_ot: float | None = None) -> float:
-    if manual_ot is not None:
-        return round(max(manual_ot, 0), 2)
-    holiday = get_holiday_row(db, attendance_date)
-    if holiday and hours_worked > 0 and status in {"Present", "Late", "Half Day", "Holiday", "Vacation"}:
-        return round(hours_worked, 2)
-    return 0.0
-
-
-def upsert_payroll_from_attendance(user_id: int, month_value: str) -> None:
-    db = get_db()
-    user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-    if not user:
-        return
-    month_prefix = datetime.strptime(month_value, "%Y-%m").strftime("%Y-%m")
-    rows = db.execute("SELECT * FROM attendance WHERE user_id=? AND substr(attendance_date,1,7)=?", (user_id, month_prefix)).fetchall()
-    late_days = sum(1 for r in rows if r["status"] == "Late")
-    absent_days = sum(1 for r in rows if r["status"] == "Absent")
-    half_days = sum(1 for r in rows if r["status"] == "Half Day")
-    day_rate = (user["monthly_basic"] or 0) / 30 if (user["monthly_basic"] or 0) else 0
-    absent_rate = user["deduction_per_absent"] or day_rate
-    deductions = round(absent_days * absent_rate + half_days * 0.5 * absent_rate + late_days * (user["deduction_per_late"] or 0), 2)
-    net_salary = round((user["monthly_basic"] or 0) + (user["default_allowances"] or 0) - deductions, 2)
-    month_label = datetime.strptime(month_value, "%Y-%m").strftime("%b %Y")
-    existing = db.execute("SELECT id FROM payroll_slips WHERE user_id=? AND month_label=?", (user_id, month_label)).fetchone()
-    if existing:
-        db.execute("UPDATE payroll_slips SET basic_salary=?, allowances=?, deductions=?, net_salary=?, generated_at=? WHERE id=?", ((user["monthly_basic"] or 0), (user["default_allowances"] or 0), deductions, net_salary, now_str(), existing["id"]))
-    else:
-        db.execute("INSERT INTO payroll_slips(user_id, month_label, basic_salary, allowances, deductions, net_salary, generated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (user_id, month_label, (user["monthly_basic"] or 0), (user["default_allowances"] or 0), deductions, net_salary, now_str()))
-
-
-def get_db() -> sqlite3.Connection:
-    if "db" not in g:
-        g.db = sqlite3.connect(DATABASE)
-        g.db.row_factory = sqlite3.Row
-        ensure_schema(g.db)
-    return g.db
-
-
-@app.teardown_appcontext
-def close_db(exception: Exception | None) -> None:
-    db = g.pop("db", None)
-    if db is not None:
-        db.close()
-
-
-def init_db() -> None:
+def initialize_postgres() -> None:
     schema = BASE_DIR / "schema.sql"
-    with closing(sqlite3.connect(DATABASE)) as db:
-        db.row_factory = sqlite3.Row
+    if not schema.exists():
+        raise RuntimeError(f"schema.sql not found at {schema}")
+
+    with closing(get_raw_connection()) as raw_conn:
+        db = PGConnectionWrapper(raw_conn)
         with open(schema, "r", encoding="utf-8") as f:
             db.executescript(f.read())
         db.commit()
-    seed_data()
 
-
-def bootstrap_database() -> None:
-    DATABASE.parent.mkdir(parents=True, exist_ok=True)
-    required_tables = {
-        "users",
-        "departments",
-        "designations",
-        "leave_types",
-        "leave_balances",
-        "leave_applications",
-        "leave_history",
-        "attendance",
-        "payroll_slips",
-        "notifications",
-        "audit_logs",
-        "email_queue",
-        "employee_documents",
-        "projects",
-        "company_settings",
-    }
-
-    needs_schema = False
-    needs_seed = False
-
-    with closing(sqlite3.connect(DATABASE)) as db:
-        db.row_factory = sqlite3.Row
-        existing_tables = {
-            row["name"]
-            for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        }
-
-        if not required_tables.issubset(existing_tables):
-            schema = BASE_DIR / "schema.sql"
-            if not schema.exists():
-                raise RuntimeError(f"schema.sql not found at {schema}")
-            with open(schema, "r", encoding="utf-8") as f:
-                db.executescript(f.read())
+        existing = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()
+        if not existing or existing["c"] == 0:
+            seed_data(db)
             db.commit()
-            needs_schema = True
-
-        ensure_schema(db)
-        user_table = db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
-        ).fetchone()
-        if user_table:
-            user_count = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
-            needs_seed = user_count == 0
-
-    if needs_schema or needs_seed:
-        seed_data()
 
 
 def allowed_file(filename: str) -> bool:
@@ -545,11 +403,15 @@ def inject_globals():
     }
 
 
-def seed_data() -> None:
-    db = sqlite3.connect(DATABASE)
-    db.row_factory = sqlite3.Row
-    if db.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"] > 0:
-        db.close()
+def seed_data(db=None) -> None:
+    own_connection = False
+    if db is None:
+        db = PGConnectionWrapper(get_raw_connection())
+        own_connection = True
+    existing_users = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()
+    if existing_users and existing_users["c"] > 0:
+        if own_connection:
+            db.close()
         return
 
     departments = [
@@ -1006,7 +868,8 @@ def seed_data() -> None:
     db.execute("UPDATE users SET monthly_basic=?, default_allowances=?, deduction_per_absent=?, deduction_per_late=? WHERE email=?", (9500, 1500, 316.67, 50, "manager@example.com"))
     db.execute("UPDATE users SET monthly_basic=?, default_allowances=?, deduction_per_absent=?, deduction_per_late=? WHERE employee_code=?", (9500, 1500, 316.67, 50, "PAC-249"))
     db.commit()
-    db.close()
+    if own_connection:
+        db.close()
 
 
 @app.route("/")
@@ -2253,11 +2116,11 @@ def uploaded_file(filename: str):
 
 @app.route("/initdb")
 def initialize_database():
-    bootstrap_database()
+    initialize_postgres()
     return "Database initialized successfully."
 
 
-bootstrap_database()
+initialize_postgres()
 
 
 if __name__ == "__main__":

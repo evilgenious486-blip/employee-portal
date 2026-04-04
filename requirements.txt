@@ -1,4 +1,5 @@
-Flask==3.1.0
-Werkzeug==3.1.3
-openpyxl==3.1.5
-gunicorn==23.0.0
+Flask
+gunicorn
+Werkzeug
+openpyxl
+psycopg2-binary

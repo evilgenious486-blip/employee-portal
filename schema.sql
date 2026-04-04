@@ -1,15 +1,16 @@
-CREATE TABLE departments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+CREATE TABLE IF NOT EXISTS departments (
+    id SERIAL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE
 );
 
-CREATE TABLE designations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS designations (
+    id SERIAL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE
 );
 
-CREATE TABLE projects (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS projects (
+    id SERIAL PRIMARY KEY,
     project_code TEXT NOT NULL UNIQUE,
     project_name TEXT NOT NULL,
     location TEXT,
@@ -21,8 +22,8 @@ CREATE TABLE projects (
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
     full_name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     employee_code TEXT NOT NULL UNIQUE,
@@ -48,15 +49,15 @@ CREATE TABLE users (
     FOREIGN KEY (project_id) REFERENCES projects (id)
 );
 
-CREATE TABLE leave_types (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS leave_types (
+    id SERIAL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     annual_quota INTEGER NOT NULL DEFAULT 0,
     is_paid INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE TABLE leave_balances (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS leave_balances (
+    id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,
     leave_type_id INTEGER NOT NULL,
     total_days INTEGER NOT NULL DEFAULT 0,
@@ -66,8 +67,8 @@ CREATE TABLE leave_balances (
     FOREIGN KEY (leave_type_id) REFERENCES leave_types (id)
 );
 
-CREATE TABLE leave_applications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS leave_applications (
+    id SERIAL PRIMARY KEY,
     application_no TEXT NOT NULL UNIQUE,
     user_id INTEGER NOT NULL,
     leave_type_id INTEGER NOT NULL,
@@ -85,8 +86,8 @@ CREATE TABLE leave_applications (
     FOREIGN KEY (leave_type_id) REFERENCES leave_types (id)
 );
 
-CREATE TABLE leave_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS leave_history (
+    id SERIAL PRIMARY KEY,
     leave_application_id INTEGER NOT NULL,
     action TEXT NOT NULL,
     remarks TEXT,
@@ -96,8 +97,8 @@ CREATE TABLE leave_history (
     FOREIGN KEY (action_by) REFERENCES users (id)
 );
 
-CREATE TABLE employee_documents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS employee_documents (
+    id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,
     title TEXT NOT NULL,
     file_name TEXT NOT NULL,
@@ -105,8 +106,8 @@ CREATE TABLE employee_documents (
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
 
-CREATE TABLE attendance (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS attendance (
+    id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,
     attendance_date TEXT NOT NULL,
     check_in TEXT,
@@ -118,16 +119,16 @@ CREATE TABLE attendance (
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
 
-CREATE TABLE holiday_calendar (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS holiday_calendar (
+    id SERIAL PRIMARY KEY,
     holiday_date TEXT NOT NULL UNIQUE,
     title TEXT NOT NULL,
-    holiday_type TEXT NOT NULL DEFAULT "Holiday",
+    holiday_type TEXT NOT NULL DEFAULT 'Holiday',
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE payroll_slips (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS payroll_slips (
+    id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,
     month_label TEXT NOT NULL,
     basic_salary REAL NOT NULL,
@@ -138,16 +139,16 @@ CREATE TABLE payroll_slips (
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
 
-CREATE TABLE company_settings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS company_settings (
+    id SERIAL PRIMARY KEY,
     company_name TEXT NOT NULL,
     leave_workflow TEXT NOT NULL,
     default_working_hours REAL NOT NULL,
     allow_document_upload INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE TABLE audit_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id SERIAL PRIMARY KEY,
     actor_user_id INTEGER,
     target_user_id INTEGER,
     module_name TEXT NOT NULL,
@@ -158,8 +159,8 @@ CREATE TABLE audit_logs (
     FOREIGN KEY (target_user_id) REFERENCES users (id)
 );
 
-CREATE TABLE notifications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS notifications (
+    id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,
     title TEXT NOT NULL,
     message TEXT NOT NULL,
@@ -169,8 +170,8 @@ CREATE TABLE notifications (
     FOREIGN KEY (user_id) REFERENCES users (id)
 );
 
-CREATE TABLE email_queue (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS email_queue (
+    id SERIAL PRIMARY KEY,
     to_user_id INTEGER,
     to_email TEXT NOT NULL,
     subject TEXT NOT NULL,
