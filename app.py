@@ -261,19 +261,6 @@ LEAVE_APPROVAL_STAGES = [
     {"stage": "hr_review", "roles": {"hr", "admin", "super_admin"}, "status": "Pending HR Approval", "approved_action": "HR Approved", "rejected_status": "Rejected by HR"},
 ]
 
-INITIAL_LEAVE_STAGE_BY_ROLE = {
-    "employee": "engineer_review",
-    "engineer": "site_manager_review",
-    "site_manager": "project_engineer_review",
-    "project_engineer": "project_manager_review",
-    "project_manager": "operation_manager_review",
-    "operation_manager": "hr_review",
-    "manager": "hr_review",
-    "hr": "hr_review",
-    "admin": "hr_review",
-    "super_admin": "hr_review",
-}
-
 
 def get_leave_stage_meta(stage: str | None):
     for item in LEAVE_APPROVAL_STAGES:
@@ -289,14 +276,22 @@ def get_leave_stage_index(stage: str | None) -> int:
     return -1
 
 
-def get_initial_leave_stage_for_role(role: str | None):
-    stage_name = INITIAL_LEAVE_STAGE_BY_ROLE.get(role or "", "engineer_review")
-    return get_leave_stage_meta(stage_name)
+def get_initial_leave_stage_start_index(role: str | None) -> int:
+    mapping = {
+        "employee": 0,
+        "engineer": 1,
+        "site_manager": 2,
+        "project_engineer": 3,
+        "project_manager": 4,
+        "operation_manager": 5,
+        "manager": 5,
+    }
+    return mapping.get(role or "", 0)
 
 
 def find_leave_approver(db, applicant_user_id: int, roles: set[str]):
     applicant = db.execute("SELECT id, project_id FROM users WHERE id=?", (applicant_user_id,)).fetchone()
-    applicant_project_id = applicant["project_id"] if applicant else None
+    project_id = applicant["project_id"] if applicant else None
     role_list = sorted(roles)
     placeholders = ", ".join(["?"] * len(role_list))
 
@@ -306,45 +301,34 @@ def find_leave_approver(db, applicant_user_id: int, roles: set[str]):
             tuple(role_list),
         ).fetchone()
 
-    if roles.intersection({"operation_manager", "manager"}):
+    if project_id:
         approver = db.execute(
-            f"SELECT * FROM users WHERE is_active=1 AND id<>? AND role IN ({placeholders}) ORDER BY CASE role WHEN 'operation_manager' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END, id LIMIT 1",
-            tuple([applicant_user_id] + role_list),
+            f"SELECT * FROM users WHERE is_active=1 AND project_id=? AND id<>? AND role IN ({placeholders}) ORDER BY id LIMIT 1",
+            tuple([project_id, applicant_user_id] + role_list),
         ).fetchone()
         if approver:
             return approver
 
-    if applicant_project_id:
+    if roles.intersection({"operation_manager", "manager"}):
         return db.execute(
-            f"SELECT * FROM users WHERE is_active=1 AND project_id=? AND id<>? AND role IN ({placeholders}) ORDER BY id LIMIT 1",
-            tuple([applicant_project_id, applicant_user_id] + role_list),
+            f"SELECT * FROM users WHERE is_active=1 AND id<>? AND role IN ({placeholders}) ORDER BY CASE role WHEN 'operation_manager' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END, id LIMIT 1",
+            tuple([applicant_user_id] + role_list),
         ).fetchone()
 
     return None
 
 
-def get_next_leave_stage(current_stage: str | None):
-    idx = get_leave_stage_index(current_stage)
-    if idx == -1 or idx + 1 >= len(LEAVE_APPROVAL_STAGES):
-        return None
-    return LEAVE_APPROVAL_STAGES[idx + 1]
-
-
-def leave_visibility_filter(user: sqlite3.Row, alias: str = "u") -> tuple[str, list[Any]]:
-    role = user["role"]
-    if role == "employee":
-        return f"{alias}.id = ?", [user["id"]]
-    if role in {"engineer", "site_manager", "project_engineer", "project_manager"}:
-        if user["project_id"]:
-            return f"({alias}.project_id = ? OR {alias}.id = ?)", [user["project_id"], user["id"]]
-        return f"{alias}.id = ?", [user["id"]]
-    if role in {"operation_manager", "manager"}:
-        return "1=1", []
-    return "1=1", []
+def resolve_next_leave_stage(db, applicant_user_id: int, start_index: int = 0):
+    for idx in range(start_index, len(LEAVE_APPROVAL_STAGES)):
+        stage = LEAVE_APPROVAL_STAGES[idx]
+        approver = find_leave_approver(db, applicant_user_id, stage["roles"])
+        if approver:
+            return idx, stage, approver
+    return None, None, None
 
 
 def can_user_approve_leave(user: sqlite3.Row, leave, applicant_project_id: int | None) -> bool:
-    stage_meta = get_leave_stage_meta(leave["current_stage"])
+    stage_meta = get_leave_stage_meta(leave.get("current_stage"))
     if not stage_meta:
         return False
     if leave["user_id"] == user["id"]:
@@ -1243,7 +1227,6 @@ def apply_leave():
         if total_days <= 0:
             flash("To date must be on or after from date.", "danger")
             return render_template("apply_leave.html", leave_types=leave_types)
-
         attachment_name = None
         file = request.files.get("attachment")
         if file and file.filename:
@@ -1252,18 +1235,15 @@ def apply_leave():
                 return render_template("apply_leave.html", leave_types=leave_types)
             attachment_name = upload_file_storage(file, "leave_attachments", ALLOWED_EXTENSIONS)
 
-        initial_stage = get_initial_leave_stage_for_role(user["role"])
-        if not initial_stage:
-            flash("Leave workflow is not configured for your role.", "danger")
-            return render_template("apply_leave.html", leave_types=leave_types)
-
-        first_approver = find_leave_approver(db, user["id"], initial_stage["roles"])
-        if not first_approver:
-            flash(f"No approver is assigned for {initial_stage['status']}. Please contact HR or Admin.", "danger")
-            return render_template("apply_leave.html", leave_types=leave_types)
-
         next_num = db.execute("SELECT COUNT(*) AS c FROM leave_applications").fetchone()["c"] + 1
         app_no = f"LV-2026-{next_num:04d}"
+
+        start_index = get_initial_leave_stage_start_index(user["role"])
+        _, first_stage, first_approver = resolve_next_leave_stage(db, user["id"], start_index)
+        if not first_stage or not first_approver:
+            flash("No approver is configured for the next leave approval stage. Please contact HR or Admin.", "danger")
+            return render_template("apply_leave.html", leave_types=leave_types)
+
         db.execute(
             "INSERT INTO leave_applications(application_no, user_id, leave_type_id, from_date, to_date, total_days, reason, attachment, status, manager_status, hr_status, current_stage, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
@@ -1275,10 +1255,10 @@ def apply_leave():
                 total_days,
                 reason,
                 attachment_name,
-                initial_stage["status"],
+                first_stage["status"],
                 "Pending",
                 "Pending",
-                initial_stage["stage"],
+                first_stage["stage"],
                 now_str(),
             ),
         )
@@ -1287,7 +1267,6 @@ def apply_leave():
             "INSERT INTO leave_history(leave_application_id, action, remarks, action_by, action_at) VALUES (?, ?, ?, ?, ?)",
             (leave_id, "Submitted", "Employee submitted leave request", user["id"], now_str()),
         )
-
         notify_user(
             first_approver["id"],
             "New leave request",
@@ -1317,11 +1296,25 @@ def my_leaves():
         JOIN leave_types lt ON la.leave_type_id = lt.id
         JOIN users u ON la.user_id = u.id
     """
-    visibility_clause, visibility_params = leave_visibility_filter(user, "u")
-    if visibility_clause != "1=1":
-        query += f" WHERE {visibility_clause}"
+    conditions = []
+    params: list[Any] = []
+
+    if user["role"] == "employee":
+        conditions.append("la.user_id = ?")
+        params.append(user["id"])
+    elif is_project_scoped_role(user["role"]):
+        if user["project_id"]:
+            conditions.append("(u.project_id = ? OR la.user_id = ?)")
+            params.extend([user["project_id"], user["id"]])
+        else:
+            conditions.append("la.user_id = ?")
+            params.append(user["id"])
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
     query += " ORDER BY la.id DESC"
-    leaves = db.execute(query, tuple(visibility_params)).fetchall()
+    leaves = db.execute(query, tuple(params)).fetchall()
     return render_template("leaves.html", leaves=leaves, page_title="Leave Tracking")
 
 
@@ -1338,14 +1331,9 @@ def leave_detail(leave_id: int):
         flash("Leave application not found.", "danger")
         return redirect(url_for("my_leaves"))
 
-    visibility_clause, visibility_params = leave_visibility_filter(user, "u")
-    if visibility_clause == "1=1":
-        can_view = True
-    else:
-        can_view = db.execute(
-            f"SELECT 1 AS ok FROM users u WHERE u.id=? AND {visibility_clause}",
-            tuple([leave["user_id"]] + visibility_params),
-        ).fetchone() is not None
+    can_view = is_hr_role(user["role"]) or is_admin_role(user["role"]) or leave["user_id"] == user["id"] or (
+        is_project_scoped_role(user["role"]) and user["project_id"] and user["project_id"] == leave["applicant_project_id"]
+    ) or user["role"] in {"project_engineer", "operation_manager", "manager"}
     if not can_view:
         flash("You do not have access to this record.", "danger")
         return redirect(url_for("my_leaves"))
@@ -1359,35 +1347,7 @@ def leave_detail(leave_id: int):
         hist_action = None
 
         if action == "approve":
-            next_stage = get_next_leave_stage(leave["current_stage"])
-            if next_stage:
-                next_approver = find_leave_approver(db, leave["user_id"], next_stage["roles"])
-                if not next_approver:
-                    flash(f"No approver is assigned for {next_stage['status']}. Please contact HR or Admin.", "danger")
-                    history = db.execute(
-                        "SELECT lh.*, u.full_name FROM leave_history lh LEFT JOIN users u ON lh.action_by=u.id WHERE lh.leave_application_id=? ORDER BY lh.id ASC",
-                        (leave_id,),
-                    ).fetchall()
-                    return render_template("leave_detail.html", leave=leave, history=history, can_act=can_act, stage_meta=stage_meta)
-
-                db.execute(
-                    "UPDATE leave_applications SET status=?, current_stage=? WHERE id=?",
-                    (next_stage["status"], next_stage["stage"], leave_id),
-                )
-                hist_action = stage_meta["approved_action"]
-                notify_user(
-                    next_approver["id"],
-                    "Leave request awaiting approval",
-                    f"{leave['application_no']} is awaiting your approval.",
-                    url_for("leave_detail", leave_id=leave_id),
-                )
-                notify_user(
-                    leave["user_id"],
-                    "Leave request updated",
-                    f"{leave['application_no']} moved to {next_stage['status']}.",
-                    url_for("leave_detail", leave_id=leave_id),
-                )
-            else:
+            if leave["current_stage"] == "hr_review":
                 db.execute(
                     "UPDATE leave_applications SET status='Approved', current_stage='closed', manager_status='Approved', hr_status='Approved' WHERE id=?",
                     (leave_id,),
@@ -1398,15 +1358,48 @@ def leave_detail(leave_id: int):
                 )
                 hist_action = stage_meta["approved_action"]
                 notify_user(leave["user_id"], "Leave approved", f"{leave['application_no']} was finally approved.", url_for("leave_detail", leave_id=leave_id))
-
+            else:
+                current_stage_index = get_leave_stage_index(leave["current_stage"])
+                _, next_stage, next_approver = resolve_next_leave_stage(db, leave["user_id"], current_stage_index + 1)
+                if next_stage and next_approver:
+                    db.execute(
+                        "UPDATE leave_applications SET status=?, current_stage=?, manager_status=?, hr_status=? WHERE id=?",
+                        (
+                            next_stage["status"],
+                            next_stage["stage"],
+                            "Approved" if next_stage["stage"] == "hr_review" else leave["manager_status"],
+                            leave["hr_status"],
+                            leave_id,
+                        ),
+                    )
+                    hist_action = stage_meta["approved_action"]
+                    notify_user(
+                        next_approver["id"],
+                        "Leave request awaiting approval",
+                        f"{leave['application_no']} is awaiting your approval.",
+                        url_for("leave_detail", leave_id=leave_id),
+                    )
+                    notify_user(
+                        leave["user_id"],
+                        "Leave request updated",
+                        f"{leave['application_no']} moved to {next_stage['status']}.",
+                        url_for("leave_detail", leave_id=leave_id),
+                    )
+                else:
+                    flash("No approver is configured for the next leave approval stage.", "danger")
+                    return redirect(url_for("leave_detail", leave_id=leave_id))
         elif action == "reject":
             db.execute(
-                "UPDATE leave_applications SET status=?, current_stage='closed' WHERE id=?",
-                (stage_meta["rejected_status"], leave_id),
+                "UPDATE leave_applications SET status=?, current_stage='closed', manager_status=?, hr_status=? WHERE id=?",
+                (
+                    stage_meta["rejected_status"],
+                    "Rejected" if leave["current_stage"] != "hr_review" else leave["manager_status"],
+                    "Rejected" if leave["current_stage"] == "hr_review" else leave["hr_status"],
+                    leave_id,
+                ),
             )
             hist_action = stage_meta["rejected_status"]
             notify_user(leave["user_id"], "Leave rejected", f"{leave['application_no']} was rejected.", url_for("leave_detail", leave_id=leave_id))
-
         if hist_action:
             db.execute(
                 "INSERT INTO leave_history(leave_application_id, action, remarks, action_by, action_at) VALUES (?, ?, ?, ?, ?)",
@@ -1416,11 +1409,7 @@ def leave_detail(leave_id: int):
             db.commit()
             flash("Action saved successfully.", "success")
             return redirect(url_for("leave_detail", leave_id=leave_id))
-
-    history = db.execute(
-        "SELECT lh.*, u.full_name FROM leave_history lh LEFT JOIN users u ON lh.action_by=u.id WHERE lh.leave_application_id=? ORDER BY lh.id ASC",
-        (leave_id,),
-    ).fetchall()
+    history = db.execute("SELECT lh.*, u.full_name FROM leave_history lh LEFT JOIN users u ON lh.action_by=u.id WHERE lh.leave_application_id=? ORDER BY lh.id ASC", (leave_id,)).fetchall()
     return render_template("leave_detail.html", leave=leave, history=history, can_act=can_act, stage_meta=stage_meta)
 
 
