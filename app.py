@@ -208,6 +208,7 @@ def get_role_options() -> list[str]:
         "site_manager",
         "project_engineer",
         "project_manager",
+        "operation_manager",
         "manager",
         "hr",
         "admin",
@@ -251,12 +252,102 @@ def can_manage_people(role: str | None) -> bool:
     return role in TEAM_ACCESS_ROLES
 
 
+LEAVE_APPROVAL_STAGES = [
+    {"stage": "engineer_review", "roles": {"engineer"}, "status": "Pending Engineer Approval", "approved_action": "Engineer Approved", "rejected_status": "Rejected by Engineer"},
+    {"stage": "site_manager_review", "roles": {"site_manager"}, "status": "Pending Site Manager Approval", "approved_action": "Site Manager Approved", "rejected_status": "Rejected by Site Manager"},
+    {"stage": "project_engineer_review", "roles": {"project_engineer"}, "status": "Pending Project Engineer Approval", "approved_action": "Project Engineer Approved", "rejected_status": "Rejected by Project Engineer"},
+    {"stage": "project_manager_review", "roles": {"project_manager"}, "status": "Pending Project Manager Approval", "approved_action": "Project Manager Approved", "rejected_status": "Rejected by Project Manager"},
+    {"stage": "operation_manager_review", "roles": {"operation_manager", "manager"}, "status": "Pending Operation Manager Approval", "approved_action": "Operation Manager Approved", "rejected_status": "Rejected by Operation Manager"},
+    {"stage": "hr_review", "roles": {"hr", "admin", "super_admin"}, "status": "Pending HR Approval", "approved_action": "HR Approved", "rejected_status": "Rejected by HR"},
+]
+
+
+def get_leave_stage_meta(stage: str | None):
+    for item in LEAVE_APPROVAL_STAGES:
+        if item["stage"] == stage:
+            return item
+    return None
+
+
+def get_leave_stage_index(stage: str | None) -> int:
+    for idx, item in enumerate(LEAVE_APPROVAL_STAGES):
+        if item["stage"] == stage:
+            return idx
+    return -1
+
+
+def find_leave_approver(db, applicant_user_id: int, roles: set[str]):
+    applicant = db.execute("SELECT id, project_id FROM users WHERE id=?", (applicant_user_id,)).fetchone()
+    project_id = applicant["project_id"] if applicant else None
+    role_list = sorted(roles)
+    placeholders = ", ".join(["?"] * len(role_list))
+
+    if roles.intersection({"hr", "admin", "super_admin"}):
+        return db.execute(
+            f"SELECT * FROM users WHERE is_active=1 AND role IN ({placeholders}) ORDER BY CASE role WHEN 'hr' THEN 0 WHEN 'admin' THEN 1 WHEN 'super_admin' THEN 2 ELSE 3 END, id LIMIT 1",
+            tuple(role_list),
+        ).fetchone()
+
+    if project_id:
+        approver = db.execute(
+            f"SELECT * FROM users WHERE is_active=1 AND project_id=? AND id<>? AND role IN ({placeholders}) ORDER BY id LIMIT 1",
+            tuple([project_id, applicant_user_id] + role_list),
+        ).fetchone()
+        if approver:
+            return approver
+
+    if roles.intersection({"operation_manager", "manager"}):
+        return db.execute(
+            f"SELECT * FROM users WHERE is_active=1 AND id<>? AND role IN ({placeholders}) ORDER BY CASE role WHEN 'operation_manager' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END, id LIMIT 1",
+            tuple([applicant_user_id] + role_list),
+        ).fetchone()
+
+    return None
+
+
+def resolve_next_leave_stage(db, applicant_user_id: int, start_index: int = 0):
+    for idx in range(start_index, len(LEAVE_APPROVAL_STAGES)):
+        stage = LEAVE_APPROVAL_STAGES[idx]
+        approver = find_leave_approver(db, applicant_user_id, stage["roles"])
+        if approver:
+            return idx, stage, approver
+    return None, None, None
+
+
+def leave_visibility_filter(user: sqlite3.Row, alias: str = "u") -> tuple[str, list[Any]]:
+    role = user["role"]
+    if role == "employee":
+        return f"{alias}.id = ?", [user["id"]]
+    if role in {"engineer", "site_manager", "project_engineer", "project_manager"}:
+        if user["project_id"]:
+            return f"{alias}.project_id = ?", [user["project_id"]]
+        return f"{alias}.id = ?", [user["id"]]
+    if role in {"operation_manager", "manager"}:
+        if user["project_id"]:
+            return f"({alias}.project_id = ? OR {alias}.id = ?)", [user["project_id"], user["id"]]
+        return "1=1", []
+    return "1=1", []
+
+
+def can_user_approve_leave(user: sqlite3.Row, leave, applicant_project_id: int | None) -> bool:
+    stage_meta = get_leave_stage_meta(leave["current_stage"])
+    if not stage_meta:
+        return False
+    if user["role"] not in stage_meta["roles"]:
+        return False
+    if user["role"] in {"hr", "admin", "super_admin", "operation_manager", "manager"}:
+        return True
+    return bool(user["project_id"] and applicant_project_id and user["project_id"] == applicant_project_id)
+
+
 def role_label(role: str | None) -> str:
     labels = {
         "admin": "Super Admin",
         "super_admin": "Super Admin",
         "manager": "Manager",
+        "operation_manager": "Operation Manager",
         "project_manager": "Project Manager",
+        "project_engineer": "Project Engineer",
         "site_manager": "Site Manager",
         "engineer": "Engineer",
         "employee": "Employee",
@@ -1130,9 +1221,9 @@ def apply_leave():
         from_date = request.form["from_date"]
         to_date = request.form["to_date"]
         reason = request.form["reason"].strip()
-        start = datetime.strptime(from_date, "%Y-%m-%d").date()
-        end = datetime.strptime(to_date, "%Y-%m-%d").date()
-        total_days = (end - start).days + 1
+        start_date = datetime.strptime(from_date, "%Y-%m-%d").date()
+        end_date = datetime.strptime(to_date, "%Y-%m-%d").date()
+        total_days = (end_date - start_date).days + 1
         if total_days <= 0:
             flash("To date must be on or after from date.", "danger")
             return render_template("apply_leave.html", leave_types=leave_types)
@@ -1145,15 +1236,21 @@ def apply_leave():
             attachment_name = upload_file_storage(file, "leave_attachments", ALLOWED_EXTENSIONS)
         next_num = db.execute("SELECT COUNT(*) AS c FROM leave_applications").fetchone()["c"] + 1
         app_no = f"LV-2026-{next_num:04d}"
+        _, first_stage, first_approver = resolve_next_leave_stage(db, user["id"], 0)
+        first_status = first_stage["status"] if first_stage else "Pending HR Approval"
+        first_stage_name = first_stage["stage"] if first_stage else "hr_review"
         db.execute(
             "INSERT INTO leave_applications(application_no, user_id, leave_type_id, from_date, to_date, total_days, reason, attachment, status, manager_status, hr_status, current_stage, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (app_no, user["id"], leave_type_id, from_date, to_date, total_days, reason, attachment_name, "Pending Manager Approval", "Pending", "Pending", "manager_review", now_str()),
+            (app_no, user["id"], leave_type_id, from_date, to_date, total_days, reason, attachment_name, first_status, "Pending", "Pending", first_stage_name, now_str()),
         )
         leave_id = db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
-        db.execute("INSERT INTO leave_history(leave_application_id, action, remarks, action_by, action_at) VALUES (?, ?, ?, ?, ?)", (leave_id, "Submitted", "Employee submitted leave request", user["id"], now_str()))
-        if user["manager_id"]:
+        db.execute(
+            "INSERT INTO leave_history(leave_application_id, action, remarks, action_by, action_at) VALUES (?, ?, ?, ?, ?)",
+            (leave_id, "Submitted", "Employee submitted leave request", user["id"], now_str()),
+        )
+        if first_approver:
             notify_user(
-                user["manager_id"],
+                first_approver["id"],
                 "New leave request",
                 f"{user['full_name']} submitted leave request {app_no}.",
                 link=url_for("leave_detail", leave_id=leave_id),
@@ -1167,24 +1264,19 @@ def apply_leave():
         return redirect(url_for("my_leaves"))
     return render_template("apply_leave.html", leave_types=leave_types)
 
-
 @app.route("/leaves")
+@app.route("/leave-tracking")
 @login_required
 def my_leaves():
     user = current_user()
     db = get_db()
     query = "SELECT la.*, lt.name AS leave_type_name, u.full_name FROM leave_applications la JOIN leave_types lt ON la.leave_type_id=lt.id JOIN users u ON la.user_id=u.id"
-    params: tuple[Any, ...] = ()
-    if user["role"] == "employee":
-        query += " WHERE la.user_id=?"
-        params = (user["id"],)
-    elif is_project_scoped_role(user["role"]):
-        query += " WHERE u.project_id=?"
-        params = (user["project_id"],)
+    where_clause, where_params = leave_visibility_filter(user, "u")
+    if where_clause != "1=1":
+        query += f" WHERE {where_clause}"
     query += " ORDER BY la.id DESC"
-    leaves = db.execute(query, params).fetchall()
-    return render_template("leaves.html", leaves=leaves)
-
+    leaves = db.execute(query, tuple(where_params)).fetchall()
+    return render_template("leaves.html", leaves=leaves, page_title="Leave Tracking")
 
 @app.route("/leave/<int:leave_id>", methods=["GET", "POST"])
 @login_required
@@ -1192,51 +1284,110 @@ def leave_detail(leave_id: int):
     user = current_user()
     db = get_db()
     leave = db.execute(
-        "SELECT la.*, lt.name AS leave_type_name, u.full_name, u.manager_id FROM leave_applications la JOIN leave_types lt ON la.leave_type_id=lt.id JOIN users u ON la.user_id=u.id WHERE la.id=?",
+        "SELECT la.*, lt.name AS leave_type_name, u.full_name, u.project_id AS applicant_project_id FROM leave_applications la JOIN leave_types lt ON la.leave_type_id=lt.id JOIN users u ON la.user_id=u.id WHERE la.id=?",
         (leave_id,),
     ).fetchone()
     if not leave:
         flash("Leave application not found.", "danger")
         return redirect(url_for("my_leaves"))
-    can_view = is_hr_role(user["role"]) or is_admin_role(user["role"]) or leave["user_id"] == user["id"] or (is_project_scoped_role(user["role"]) and user["project_id"] == db.execute("SELECT project_id FROM users WHERE id=?", (leave["user_id"],)).fetchone()["project_id"])
+
+    visibility_clause, visibility_params = leave_visibility_filter(user, "u")
+    if visibility_clause == "1=1":
+        can_view = True
+    else:
+        can_view = db.execute(
+            f"SELECT 1 AS ok FROM users u WHERE u.id=? AND {visibility_clause}",
+            tuple([leave["user_id"]] + visibility_params),
+        ).fetchone() is not None
     if not can_view:
         flash("You do not have access to this record.", "danger")
         return redirect(url_for("my_leaves"))
-    if request.method == "POST":
+
+    stage_meta = get_leave_stage_meta(leave["current_stage"])
+    can_act = can_user_approve_leave(user, leave, leave["applicant_project_id"])
+
+    if request.method == "POST" and can_act and stage_meta:
         action = request.form["action"]
         remarks = request.form.get("remarks", "").strip() or None
         hist_action = None
-        if user["role"] in {"manager", "project_manager", "site_manager"} and leave["manager_id"] == user["id"] and leave["manager_status"] == "Pending":
-            if action == "approve":
-                db.execute("UPDATE leave_applications SET manager_status='Approved', status='Pending HR Approval', current_stage='hr_review' WHERE id=?", (leave_id,))
-                hist_action = "Manager Approved"
-                hr_user = db.execute("SELECT id FROM users WHERE role='hr' AND is_active=1 ORDER BY id LIMIT 1").fetchone()
-                if hr_user:
-                    notify_user(hr_user["id"], "Leave request pending HR review", f"{leave['application_no']} is ready for HR review.", url_for("leave_detail", leave_id=leave_id))
-                notify_user(leave["user_id"], "Manager approved leave", f"{leave['application_no']} has moved to HR review.", url_for("leave_detail", leave_id=leave_id))
-            elif action == "reject":
-                db.execute("UPDATE leave_applications SET manager_status='Rejected', status='Rejected by Manager', current_stage='closed' WHERE id=?", (leave_id,))
-                hist_action = "Manager Rejected"
-                notify_user(leave["user_id"], "Leave rejected", f"{leave['application_no']} was rejected by your manager.", url_for("leave_detail", leave_id=leave_id))
-        elif user["role"] in {"hr", "admin"} and leave["manager_status"] == "Approved" and leave["hr_status"] == "Pending":
-            if action == "approve":
-                db.execute("UPDATE leave_applications SET hr_status='Approved', status='Final Approved', current_stage='closed' WHERE id=?", (leave_id,))
-                db.execute("UPDATE leave_balances SET used_days=used_days+?, remaining_days=remaining_days-? WHERE user_id=? AND leave_type_id=?", (leave["total_days"], leave["total_days"], leave["user_id"], leave["leave_type_id"]))
-                hist_action = "HR Approved"
+
+        if action == "approve":
+            if leave["current_stage"] == "hr_review":
+                db.execute(
+                    "UPDATE leave_applications SET status='Approved', current_stage='closed', manager_status='Approved', hr_status='Approved' WHERE id=?",
+                    (leave_id,),
+                )
+                db.execute(
+                    "UPDATE leave_balances SET used_days=used_days+?, remaining_days=remaining_days-? WHERE user_id=? AND leave_type_id=?",
+                    (leave["total_days"], leave["total_days"], leave["user_id"], leave["leave_type_id"]),
+                )
+                hist_action = stage_meta["approved_action"]
                 notify_user(leave["user_id"], "Leave approved", f"{leave['application_no']} was finally approved.", url_for("leave_detail", leave_id=leave_id))
-            elif action == "reject":
-                db.execute("UPDATE leave_applications SET hr_status='Rejected', status='Rejected by HR', current_stage='closed' WHERE id=?", (leave_id,))
-                hist_action = "HR Rejected"
-                notify_user(leave["user_id"], "Leave rejected", f"{leave['application_no']} was rejected by HR.", url_for("leave_detail", leave_id=leave_id))
+            else:
+                current_stage_index = get_leave_stage_index(leave["current_stage"])
+                _, next_stage, next_approver = resolve_next_leave_stage(db, leave["user_id"], current_stage_index + 1)
+                if next_stage:
+                    db.execute(
+                        "UPDATE leave_applications SET status=?, current_stage=?, manager_status=?, hr_status=? WHERE id=?",
+                        (
+                            next_stage["status"],
+                            next_stage["stage"],
+                            "Approved" if next_stage["stage"] == "hr_review" else leave["manager_status"],
+                            leave["hr_status"],
+                            leave_id,
+                        ),
+                    )
+                    hist_action = stage_meta["approved_action"]
+                    if next_approver:
+                        notify_user(
+                            next_approver["id"],
+                            "Leave request awaiting approval",
+                            f"{leave['application_no']} is awaiting your approval.",
+                            url_for("leave_detail", leave_id=leave_id),
+                        )
+                    notify_user(
+                        leave["user_id"],
+                        "Leave request updated",
+                        f"{leave['application_no']} moved to {next_stage['status']}.",
+                        url_for("leave_detail", leave_id=leave_id),
+                    )
+                else:
+                    db.execute(
+                        "UPDATE leave_applications SET status='Approved', current_stage='closed', manager_status='Approved', hr_status='Approved' WHERE id=?",
+                        (leave_id,),
+                    )
+                    db.execute(
+                        "UPDATE leave_balances SET used_days=used_days+?, remaining_days=remaining_days-? WHERE user_id=? AND leave_type_id=?",
+                        (leave["total_days"], leave["total_days"], leave["user_id"], leave["leave_type_id"]),
+                    )
+                    hist_action = stage_meta["approved_action"]
+                    notify_user(leave["user_id"], "Leave approved", f"{leave['application_no']} was approved.", url_for("leave_detail", leave_id=leave_id))
+        elif action == "reject":
+            db.execute(
+                "UPDATE leave_applications SET status=?, current_stage='closed', manager_status=?, hr_status=? WHERE id=?",
+                (
+                    stage_meta["rejected_status"],
+                    "Rejected" if leave["current_stage"] != "hr_review" else leave["manager_status"],
+                    "Rejected" if leave["current_stage"] == "hr_review" else leave["hr_status"],
+                    leave_id,
+                ),
+            )
+            hist_action = stage_meta["rejected_status"]
+            notify_user(leave["user_id"], "Leave rejected", f"{leave['application_no']} was rejected.", url_for("leave_detail", leave_id=leave_id))
         if hist_action:
-            db.execute("INSERT INTO leave_history(leave_application_id, action, remarks, action_by, action_at) VALUES (?, ?, ?, ?, ?)", (leave_id, hist_action, remarks, user["id"], now_str()))
+            db.execute(
+                "INSERT INTO leave_history(leave_application_id, action, remarks, action_by, action_at) VALUES (?, ?, ?, ?, ?)",
+                (leave_id, hist_action, remarks, user["id"], now_str()),
+            )
             log_audit("Leave", hist_action, f"Leave request {leave['application_no']} actioned", leave["user_id"])
             db.commit()
             flash("Action saved successfully.", "success")
             return redirect(url_for("leave_detail", leave_id=leave_id))
-    history = db.execute("SELECT lh.*, u.full_name FROM leave_history lh LEFT JOIN users u ON lh.action_by=u.id WHERE lh.leave_application_id=? ORDER BY lh.id ASC", (leave_id,)).fetchall()
-    return render_template("leave_detail.html", leave=leave, history=history)
-
+    history = db.execute(
+        "SELECT lh.*, u.full_name FROM leave_history lh LEFT JOIN users u ON lh.action_by=u.id WHERE lh.leave_application_id=? ORDER BY lh.id ASC",
+        (leave_id,),
+    ).fetchall()
+    return render_template("leave_detail.html", leave=leave, history=history, can_act=can_act, stage_meta=stage_meta)
 
 @app.route("/team")
 @login_required
