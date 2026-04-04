@@ -72,7 +72,8 @@ class PGConnectionWrapper:
         self.last_insert_id: int | None = None
 
     def _translate_query(self, query: str) -> str:
-        q = query.replace("?", "%s")
+        q = query.replace("%", "%%")
+        q = q.replace("?", "%s")
         q = q.replace("ifnull(", "COALESCE(")
         return q
 
@@ -116,20 +117,6 @@ class PGConnectionWrapper:
 
 def get_raw_connection():
     return psycopg2.connect(DATABASE_URL)
-
-
-def get_db():
-    if "db" not in g:
-        raw_conn = get_raw_connection()
-        g.db = PGConnectionWrapper(raw_conn)
-    return g.db
-
-
-@app.teardown_appcontext
-def close_db(exception=None):
-    db = g.pop("db", None)
-    if db is not None:
-        db.close()
 
 
 ADMIN_ROLES = {"admin", "super_admin"}
