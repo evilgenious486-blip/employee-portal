@@ -276,7 +276,7 @@ def ensure_schema(db: sqlite3.Connection) -> None:
     if not default_project:
         db.execute(
             "INSERT INTO projects(project_code, project_name, location, client_name, status, start_date, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("PRJ-001", "Head Office / Shared Resources", "Dammam", "Pacost", "Active", date.today().isoformat(), None, now_str()),
+            ("PRJ-001", "Al Nahda Project", "Dammam", "Pacost", "Active", date.today().isoformat(), None, now_str()),
         )
         default_project = db.execute("SELECT id FROM projects ORDER BY id LIMIT 1").fetchone()
     if default_project:
@@ -573,10 +573,10 @@ def seed_data() -> None:
 
     users = [
         {
-            "full_name": "Project Manager",
+            "full_name": "Hamid Ali Khan",
             "email": "projectmanager@example.com",
             "employee_code": "PAC-PM-001",
-            "password": "Project@123",
+            "password": "Hamid@123",
             "role": "manager",
             "department": "Project Management",
             "designation": "Project Manager",
@@ -613,20 +613,6 @@ def seed_data() -> None:
             "address": "Dammam, Saudi Arabia",
             "emergency_contact": "+966500001113",
             "join_date": "2024-03-15",
-        },
-        {
-            "full_name": "Ali Site Engineer",
-            "email": "employee@example.com",
-            "employee_code": "PAC-SE-001",
-            "password": "Employee@123",
-            "role": "employee",
-            "department": "Electrical",
-            "designation": "Site Engineer",
-            "manager_email": "manager@example.com",
-            "phone": "+966500000004",
-            "address": "Dammam, Saudi Arabia",
-            "emergency_contact": "+966500001114",
-            "join_date": "2025-01-10",
         },
         {
             "full_name": "Faisal Malik",
@@ -867,7 +853,7 @@ def seed_data() -> None:
             "join_date": "2025-03-22",
         },
         {
-            "full_name": "Hina HR",
+            "full_name": "Asif Chandal",
             "email": "hr@example.com",
             "employee_code": "EMP1008",
             "password": "HR@12345",
