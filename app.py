@@ -1217,6 +1217,25 @@ def apply_leave():
     user = current_user()
     leave_types = db.execute("SELECT * FROM leave_types ORDER BY name").fetchall()
     if request.method == "POST":
+        existing_open_leave = db.execute(
+            """
+            SELECT application_no, status
+            FROM leave_applications
+            WHERE user_id = ?
+              AND current_stage != 'closed'
+              AND status NOT LIKE 'Rejected%'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (user["id"],),
+        ).fetchone()
+        if existing_open_leave:
+            flash(
+                f"You already have an active leave request ({existing_open_leave['application_no']}) with status: {existing_open_leave['status']}. You cannot submit a new leave request until the current one is rejected or closed.",
+                "warning",
+            )
+            return redirect(url_for("my_leaves"))
+
         leave_type_id = int(request.form["leave_type_id"])
         from_date = request.form["from_date"]
         to_date = request.form["to_date"]
@@ -1227,13 +1246,19 @@ def apply_leave():
         if total_days <= 0:
             flash("To date must be on or after from date.", "danger")
             return render_template("apply_leave.html", leave_types=leave_types)
-        attachment_name = None
+
         file = request.files.get("attachment")
-        if file and file.filename:
-            if not allowed_file(file.filename):
-                flash("Unsupported file type.", "danger")
-                return render_template("apply_leave.html", leave_types=leave_types)
-            attachment_name = upload_file_storage(file, "leave_attachments", ALLOWED_EXTENSIONS)
+        if not file or not file.filename:
+            flash("Leave application PDF attachment is required.", "danger")
+            return render_template("apply_leave.html", leave_types=leave_types)
+
+        uploaded_name = secure_filename(file.filename)
+        file_ext = uploaded_name.rsplit('.', 1)[-1].lower() if '.' in uploaded_name else ''
+        if file_ext != "pdf":
+            flash("Only PDF file is allowed for leave application attachment.", "danger")
+            return render_template("apply_leave.html", leave_types=leave_types)
+
+        attachment_name = upload_file_storage(file, "leave_attachments", {"pdf"})
         next_num = db.execute("SELECT COUNT(*) AS c FROM leave_applications").fetchone()["c"] + 1
         app_no = f"LV-2026-{next_num:04d}"
         _, first_stage, first_approver = resolve_next_leave_stage(db, user["id"], 0)
