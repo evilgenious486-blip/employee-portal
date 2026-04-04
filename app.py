@@ -1032,7 +1032,6 @@ def change_password():
 
 @app.route("/leave/apply", methods=["GET", "POST"])
 @login_required
-@role_required("employee")
 def apply_leave():
     db = get_db()
     user = current_user()
