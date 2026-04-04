@@ -16,7 +16,7 @@
           <div class="col-md-4"><strong>To:</strong><br>{{ leave.to_date }}</div>
           <div class="col-md-4"><strong>Total Days:</strong><br>{{ leave.total_days }}</div>
           <div class="col-12"><strong>Reason:</strong><br>{{ leave.reason }}</div>
-          <div class="col-md-6"><strong>Current Stage:</strong><br>{{ stage_meta.status if stage_meta else leave.current_stage }}</div>
+          <div class="col-md-6"><strong>Current Stage:</strong><br>{{ leave.current_stage }}</div>
           <div class="col-md-6"><strong>Workflow Status:</strong><br>{{ leave.status }}</div>
           <div class="col-12">
             <strong>Attachment:</strong><br>
@@ -30,10 +30,35 @@
       </div>
     </div>
 
-    {% if can_act and stage_meta and leave.current_stage != 'closed' %}
+    {% if can_hr_edit_dates %}
     <div class="card border-0 shadow-sm rounded-4 mt-4">
       <div class="card-body">
-        <h5 class="mb-3">{{ role_label(current_user.role) }} Action</h5>
+        <h5 class="mb-3">Edit Leave Dates</h5>
+        <form method="post" class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">From Date</label>
+            <input type="date" class="form-control" name="from_date" value="{{ leave.from_date }}" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">To Date</label>
+            <input type="date" class="form-control" name="to_date" value="{{ leave.to_date }}" required>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Remarks</label>
+            <textarea class="form-control" name="remarks" rows="2" placeholder="Optional remarks"></textarea>
+          </div>
+          <div class="col-12">
+            <button name="action" value="edit_dates" class="btn btn-primary">Save Dates</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if leave.current_stage != 'closed' and (current_user.role in ['manager','project_manager','site_manager','hr','admin','super_admin']) %}
+    <div class="card border-0 shadow-sm rounded-4 mt-4">
+      <div class="card-body">
+        <h5 class="mb-3">Leave Action</h5>
         <form method="post">
           <div class="mb-3">
             <label class="form-label">Remarks</label>
@@ -41,6 +66,18 @@
           </div>
           <button name="action" value="approve" class="btn btn-success">Approve</button>
           <button name="action" value="reject" class="btn btn-danger">Reject</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if can_admin_manage %}
+    <div class="card border-0 shadow-sm rounded-4 mt-4 border-danger">
+      <div class="card-body">
+        <h5 class="mb-3 text-danger">Admin Controls</h5>
+        <form method="post" onsubmit="return confirm('Delete this leave application? This cannot be undone.');">
+          <input type="hidden" name="remarks" value="Deleted by admin">
+          <button name="action" value="delete" class="btn btn-outline-danger">Delete Leave Application</button>
         </form>
       </div>
     </div>
