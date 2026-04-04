@@ -1142,7 +1142,7 @@ def apply_leave():
             if not allowed_file(file.filename):
                 flash("Unsupported file type.", "danger")
                 return render_template("apply_leave.html", leave_types=leave_types)
-            attachment_name = upload_file_storage(file, "employee_portal/leave_attachments", ALLOWED_EXTENSIONS)
+            attachment_name = upload_file_storage(file, "leave_attachments", ALLOWED_EXTENSIONS)
         next_num = db.execute("SELECT COUNT(*) AS c FROM leave_applications").fetchone()["c"] + 1
         app_no = f"LV-2026-{next_num:04d}"
         db.execute(
@@ -1920,7 +1920,7 @@ def upload_document():
         flash("Unsupported file type.", "danger")
         return redirect(url_for("documents"))
     filename = f"doc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{secure_filename(file.filename)}"
-    stored_file = upload_file_storage(file, "employee_portal/employee_documents", ALLOWED_EXTENSIONS)
+    stored_file = upload_file_storage(file, "employee_portal/documents", ALLOWED_EXTENSIONS)
     db.execute("INSERT INTO employee_documents(user_id, title, file_name, uploaded_at) VALUES (?, ?, ?, ?)", (user_id, title, stored_file, now_str()))
     notify_user(user_id, "New document uploaded", f"A new document titled '{title}' has been uploaded to your portal.", url_for("documents"))
     log_audit("Documents", "Uploaded", f"Uploaded document {title}", user_id)
