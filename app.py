@@ -119,6 +119,28 @@ def get_raw_connection():
     return psycopg2.connect(DATABASE_URL)
 
 
+
+# Role list for dropdowns (employee create/edit)
+def get_role_options() -> list[str]:
+    return [
+        "employee",
+        "engineer",
+        "site_engineer",
+        "safety_officer",
+        "civil_engineer",
+        "electrical_engineer",
+        "mechanical_engineer",
+        "department_engineer",
+        "site_manager",
+        "project_engineer",
+        "project_manager",
+        "manager",
+        "hr",
+        "admin",
+        "super_admin"
+    ]
+
+
 def get_db():
     if "db" not in g:
         raw_conn = get_raw_connection()
