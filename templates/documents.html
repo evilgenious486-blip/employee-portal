@@ -12,5 +12,5 @@
   </div></form>
 </div></div>
 {% endif %}
-<div class="card border-0 shadow-sm rounded-4"><div class="card-body"><div class="table-responsive"><table class="table align-middle"><thead><tr><th>Employee</th><th>Title</th><th>Uploaded At</th><th></th></tr></thead><tbody>{% for row in docs %}<tr><td>{{ row.full_name }}</td><td>{{ row.title }}</td><td>{{ row.uploaded_at }}</td><td><a href="{{ url_for('uploaded_file', filename=row.file_name) }}" target="_blank" class="btn btn-sm btn-outline-primary">Open</a></td></tr>{% else %}<tr><td colspan="4" class="text-center text-secondary py-4">No documents found.</td></tr>{% endfor %}</tbody></table></div></div></div>
+<div class="card border-0 shadow-sm rounded-4"><div class="card-body"><div class="table-responsive"><table class="table align-middle"><thead><tr><th>Employee</th><th>Title</th><th>Uploaded At</th><th></th></tr></thead><tbody>{% for row in docs %}<tr><td>{{ row.full_name }}</td><td>{{ row.title }}</td><td>{{ row.uploaded_at }}</td><td><a href="{{ file_url(row.file_name) }}" target="_blank" class="btn btn-sm btn-outline-primary">Open</a></td></tr>{% else %}<tr><td colspan="4" class="text-center text-secondary py-4">No documents found.</td></tr>{% endfor %}</tbody></table></div></div></div>
 {% endblock %}

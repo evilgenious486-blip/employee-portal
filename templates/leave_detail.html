@@ -21,7 +21,7 @@
           <div class="col-12">
             <strong>Attachment:</strong><br>
             {% if leave.attachment %}
-              <a href="{{ url_for('uploaded_file', filename=leave.attachment) }}" target="_blank">Open attachment</a>
+              <a href="{{ file_url(leave.attachment) }}" target="_blank">Open attachment</a>
             {% else %}
               -
             {% endif %}

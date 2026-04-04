@@ -3,3 +3,4 @@ gunicorn
 Werkzeug
 openpyxl
 psycopg2-binary
+cloudinary

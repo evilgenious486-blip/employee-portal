@@ -74,7 +74,7 @@ if (sidebar) sidebar.classList.toggle('show-sidebar');
 
 <img class="sidebar-user-avatar sidebar-user-avatar-image"
 
-src="{{ url_for('uploaded_file', filename=current_user.avatar_filename) }}">
+src="{{ file_url(current_user.avatar_filename) }}">
 
 {% else %}
 

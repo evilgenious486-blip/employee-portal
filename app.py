@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, flash, g, redirect, render_template, request, send_file, send_from_directory, session, url_for
+import cloudinary
+import cloudinary.uploader
 from openpyxl import Workbook, load_workbook
 import io
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -27,6 +29,19 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-this-secret-key")
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
 UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+
+CLOUDINARY_CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME", "").strip()
+CLOUDINARY_API_KEY = os.environ.get("CLOUDINARY_API_KEY", "").strip()
+CLOUDINARY_API_SECRET = os.environ.get("CLOUDINARY_API_SECRET", "").strip()
+CLOUDINARY_ENABLED = all([CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET])
+
+if CLOUDINARY_ENABLED:
+    cloudinary.config(
+        cloud_name=CLOUDINARY_CLOUD_NAME,
+        api_key=CLOUDINARY_API_KEY,
+        api_secret=CLOUDINARY_API_SECRET,
+        secure=True,
+    )
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set")
@@ -118,6 +133,65 @@ class PGConnectionWrapper:
 def get_raw_connection():
     return psycopg2.connect(DATABASE_URL)
 
+
+def is_external_file(value: str | None) -> bool:
+    return bool(value) and (str(value).startswith("http://") or str(value).startswith("https://"))
+
+
+def file_url(value: str | None) -> str | None:
+    if not value:
+        return None
+    return value if is_external_file(value) else url_for("uploaded_file", filename=value)
+
+
+def upload_file_storage(file, folder: str, allowed_extensions: set[str] | None = None) -> str:
+    filename = secure_filename(file.filename or "")
+    if not filename:
+        raise ValueError("Selected file is invalid.")
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    if allowed_extensions is not None and ext not in allowed_extensions:
+        raise ValueError("Unsupported file type.")
+
+    if CLOUDINARY_ENABLED:
+        resource_type = "image" if ext in ALLOWED_IMAGE_EXTENSIONS else "raw"
+        public_id = f"{folder}/{datetime.now().strftime('%Y%m%d%H%M%S')}_{secrets.token_hex(6)}_{Path(filename).stem}"
+        result = cloudinary.uploader.upload(
+            file,
+            folder=None,
+            public_id=public_id,
+            resource_type=resource_type,
+            overwrite=False,
+            use_filename=False,
+            unique_filename=False,
+        )
+        return result.get("secure_url") or result.get("url")
+
+    stored_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{secrets.token_hex(4)}_{filename}"
+    file_path = UPLOAD_FOLDER / stored_name
+    file.save(file_path)
+    return stored_name
+
+
+def delete_stored_file(value: str | None) -> None:
+    if not value:
+        return
+    if is_external_file(value):
+        return
+    file_path = UPLOAD_FOLDER / value
+    if file_path.exists():
+        try:
+            file_path.unlink()
+        except OSError:
+            pass
+
+
+@app.context_processor
+def inject_template_helpers():
+    return {
+        "file_url": file_url,
+        "is_external_file": is_external_file,
+        "cloudinary_enabled": CLOUDINARY_ENABLED,
+    }
 
 
 # Role list for dropdowns (employee create/edit)
@@ -1002,17 +1076,10 @@ def profile():
         if avatar and avatar.filename:
             if allowed_image_file(avatar.filename):
                 ext = avatar.filename.rsplit('.', 1)[1].lower()
-                avatar_filename = secure_filename(f"avatar_{user['id']}_{secrets.token_hex(8)}.{ext}")
-                avatar_path = UPLOAD_FOLDER / avatar_filename
-                avatar.save(avatar_path)
                 old_avatar = user["avatar_filename"]
+                avatar_filename = upload_file_storage(avatar, "employee_portal/profile_pictures", ALLOWED_IMAGE_EXTENSIONS)
                 if old_avatar and old_avatar != avatar_filename:
-                    old_path = UPLOAD_FOLDER / old_avatar
-                    if old_path.exists():
-                        try:
-                            old_path.unlink()
-                        except OSError:
-                            pass
+                    delete_stored_file(old_avatar)
             else:
                 flash("Profile picture must be a PNG, JPG, or JPEG image.", "warning")
                 return redirect(url_for("profile"))
@@ -1075,8 +1142,7 @@ def apply_leave():
             if not allowed_file(file.filename):
                 flash("Unsupported file type.", "danger")
                 return render_template("apply_leave.html", leave_types=leave_types)
-            attachment_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{secure_filename(file.filename)}"
-            file.save(os.path.join(app.config["UPLOAD_FOLDER"], attachment_name))
+            attachment_name = upload_file_storage(file, "employee_portal/leave_attachments", ALLOWED_EXTENSIONS)
         next_num = db.execute("SELECT COUNT(*) AS c FROM leave_applications").fetchone()["c"] + 1
         app_no = f"LV-2026-{next_num:04d}"
         db.execute(
@@ -1567,12 +1633,7 @@ def delete_employee(user_id: int):
     db.execute("DELETE FROM users WHERE id=?", (user_id,))
 
     if avatar_filename:
-        avatar_path = UPLOAD_FOLDER / avatar_filename
-        if avatar_path.exists():
-            try:
-                avatar_path.unlink()
-            except OSError:
-                pass
+        delete_stored_file(avatar_filename)
 
     log_audit("Employee", "Deleted", f"Deleted employee {employee['employee_code']}", None)
     db.commit()
@@ -1859,8 +1920,8 @@ def upload_document():
         flash("Unsupported file type.", "danger")
         return redirect(url_for("documents"))
     filename = f"doc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{secure_filename(file.filename)}"
-    file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
-    db.execute("INSERT INTO employee_documents(user_id, title, file_name, uploaded_at) VALUES (?, ?, ?, ?)", (user_id, title, filename, now_str()))
+    stored_file = upload_file_storage(file, "employee_portal/employee_documents", ALLOWED_EXTENSIONS)
+    db.execute("INSERT INTO employee_documents(user_id, title, file_name, uploaded_at) VALUES (?, ?, ?, ?)", (user_id, title, stored_file, now_str()))
     notify_user(user_id, "New document uploaded", f"A new document titled '{title}' has been uploaded to your portal.", url_for("documents"))
     log_audit("Documents", "Uploaded", f"Uploaded document {title}", user_id)
     db.commit()
@@ -2147,6 +2208,8 @@ def settings_view():
 @app.route("/uploads/<path:filename>")
 @login_required
 def uploaded_file(filename: str):
+    if is_external_file(filename):
+        return redirect(filename)
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
 
