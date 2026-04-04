@@ -1,0 +1,19 @@
+Final fixes included:
+1. Seed data crash fixed:
+   - employee@example.com replaced with faisal.malik@example.com
+2. schema.sql made safe:
+   - removed DROP TABLE statements so data is not wiped on schema execution
+3. Persistent storage support added:
+   - app.py now uses APP_DATA_DIR if set
+   - recommended Render persistent disk mount path: /var/data/employee_portal
+
+Important:
+- On Render Free, local file changes and SQLite data are lost after idle spin-down/restarts.
+- For permanent data, attach a Persistent Disk on a paid Render service and set:
+      APP_DATA_DIR=/var/data/employee_portal
+- Keep Start Command:
+      gunicorn app:app
+
+Replace these files in your project:
+- app.py
+- schema.sql
