@@ -231,7 +231,9 @@ def close_db(exception=None):
 
 ADMIN_ROLES = {"admin", "super_admin"}
 HR_ROLES = {"hr"}
-PROJECT_LEAD_ROLES = {"manager", "project_manager", "site_manager"}
+PROJECT_VIEW_ROLES = {"manager", "project_manager"}
+PROJECT_ASSIGNMENT_ROLES = {"site_manager"}
+PROJECT_LEAD_ROLES = PROJECT_VIEW_ROLES | PROJECT_ASSIGNMENT_ROLES
 TEAM_ACCESS_ROLES = ADMIN_ROLES | HR_ROLES | PROJECT_LEAD_ROLES
 
 
@@ -245,6 +247,10 @@ def is_hr_role(role: str | None) -> bool:
 
 def is_project_scoped_role(role: str | None) -> bool:
     return role in PROJECT_LEAD_ROLES
+
+
+def can_assign_project_members(role: str | None) -> bool:
+    return role in PROJECT_ASSIGNMENT_ROLES
 
 
 def can_manage_people(role: str | None) -> bool:
@@ -269,7 +275,12 @@ def visible_user_filter(user: sqlite3.Row, alias: str = "u") -> tuple[str, list[
     role = user["role"]
     if is_admin_role(role) or is_hr_role(role):
         return "1=1", []
-    if is_project_scoped_role(role):
+    if role in PROJECT_ASSIGNMENT_ROLES:
+        project_id = user["project_id"]
+        if project_id:
+            return f"({alias}.project_id = ? OR {alias}.project_id IS NULL)", [project_id]
+        return f"{alias}.project_id IS NULL", []
+    if role in PROJECT_VIEW_ROLES:
         project_id = user["project_id"]
         if project_id:
             return f"{alias}.project_id = ?", [project_id]
@@ -330,30 +341,18 @@ def employee_directory_rows(db: sqlite3.Connection, viewer: sqlite3.Row, search:
     """
     conditions: list[str] = []
     params: list[Any] = []
-
-    if is_project_scoped_role(viewer["role"]):
-        if viewer["project_id"]:
-            conditions.append("(u.project_id = ? OR u.project_id IS NULL)")
-            params.append(viewer["project_id"])
-        else:
-            conditions.append("u.project_id IS NULL")
-    else:
-        visible_condition, visible_params = visible_user_filter(viewer, "u")
-        conditions.append(visible_condition)
-        params.extend(visible_params)
-
-    if project_filter is not None:
-        if project_filter:
-            conditions.append("u.project_id = ?")
-            params.append(project_filter)
-        else:
-            conditions.append("u.project_id IS NULL")
+    visible_condition, visible_params = visible_user_filter(viewer, "u")
+    conditions.append(visible_condition)
+    params.extend(visible_params)
+    if project_filter:
+        conditions.append("u.project_id = ?")
+        params.append(project_filter)
     if search:
         conditions.append("(u.full_name LIKE ? OR u.employee_code LIKE ? OR u.email LIKE ? OR ifnull(p.project_name,'') LIKE ?)")
         like = f"%{search}%"
         params.extend([like, like, like, like])
     query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY COALESCE(p.project_name, 'Unassigned'), u.full_name"
+    query += " ORDER BY p.project_name, u.full_name"
     return db.execute(query, tuple(params)).fetchall()
 
 
@@ -1181,7 +1180,6 @@ def apply_leave():
 
 
 @app.route("/leaves")
-@app.route("/leave-tracking")
 @login_required
 def my_leaves():
     user = current_user()
@@ -1192,15 +1190,11 @@ def my_leaves():
         query += " WHERE la.user_id=?"
         params = (user["id"],)
     elif is_project_scoped_role(user["role"]):
-        if user["project_id"]:
-            query += " WHERE (u.project_id=? OR la.user_id=?)"
-            params = (user["project_id"], user["id"])
-        else:
-            query += " WHERE la.user_id=?"
-            params = (user["id"],)
+        query += " WHERE u.project_id=?"
+        params = (user["project_id"],)
     query += " ORDER BY la.id DESC"
     leaves = db.execute(query, params).fetchall()
-    return render_template("leaves.html", leaves=leaves, page_title="Leave Tracking")
+    return render_template("leaves.html", leaves=leaves)
 
 
 @app.route("/leave/<int:leave_id>", methods=["GET", "POST"])
@@ -1257,7 +1251,7 @@ def leave_detail(leave_id: int):
 
 @app.route("/team")
 @login_required
-@role_required("manager", "project_manager", "site_manager", "engineer", "hr", "admin", "super_admin")
+@role_required("manager", "project_manager", "site_manager", "hr", "admin", "super_admin")
 def team():
     user = current_user()
     db = get_db()
@@ -1270,7 +1264,7 @@ def team():
 
 @app.route("/team/export")
 @login_required
-@role_required("manager", "project_manager", "site_manager", "engineer", "hr", "admin", "super_admin")
+@role_required("manager", "project_manager", "site_manager", "hr", "admin", "super_admin")
 def export_team():
     user = current_user()
     db = get_db()
@@ -1566,7 +1560,7 @@ def new_employee():
 
 @app.route("/employees/<int:user_id>/edit", methods=["GET", "POST"])
 @login_required
-@role_required("manager", "project_manager", "site_manager", "hr", "admin", "super_admin")
+@role_required("site_manager", "hr", "admin", "super_admin")
 def edit_employee(user_id: int):
     return employee_form_handler(user_id)
 
@@ -1577,59 +1571,37 @@ def employee_form_handler(user_id: int | None = None):
     departments = db.execute("SELECT * FROM departments ORDER BY name").fetchall()
     designations = db.execute("SELECT * FROM designations ORDER BY name").fetchall()
     managers = db.execute("SELECT id, full_name, role, project_id FROM users WHERE role IN ('manager','project_manager','site_manager') AND is_active=1 ORDER BY full_name").fetchall()
-    projects = project_choice_rows(db, viewer if is_project_scoped_role(viewer["role"]) else None)
+    projects = project_choice_rows(db, viewer)
     employee = None
-    manager_assignment_only = is_project_scoped_role(viewer["role"])
-
     if user_id is not None:
         employee = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if not employee:
             flash("Employee not found.", "danger")
             return redirect(url_for("team"))
-        if manager_assignment_only:
-            allowed_project_ids = {viewer["project_id"]} if viewer["project_id"] else set()
-            employee_project_id = employee["project_id"]
-            if employee["id"] == viewer["id"]:
+        if viewer["role"] == "site_manager":
+            if viewer["id"] == employee["id"]:
                 flash("You cannot change your own project assignment.", "danger")
                 return redirect(url_for("employee_detail", user_id=user_id))
-            if employee_project_id is not None and employee_project_id not in allowed_project_ids:
-                flash("You can only manage employees from your own project or unassigned employees.", "danger")
+            viewer_project_id = viewer["project_id"]
+            employee_project_id = employee["project_id"]
+            if not viewer_project_id:
+                flash("Assign your own site manager account to a project first.", "danger")
                 return redirect(url_for("team"))
-            managers = [m for m in managers if m["id"] == viewer["id"] or (viewer["project_id"] and m["project_id"] == viewer["project_id"])]
-    elif manager_assignment_only:
-        flash("Project managers can assign or remove employees from projects through the edit employee page only.", "warning")
-        return redirect(url_for("team"))
-
+            if employee_project_id not in (None, viewer_project_id):
+                flash("Site Manager can only edit employees from the same project or unassigned employees.", "danger")
+                return redirect(url_for("team"))
     if request.method == "POST":
         form = request.form
         manager_id = form.get("manager_id") or None
         project_id = form.get("project_id") or None
-
-        if manager_assignment_only:
-            if user_id is None or employee is None:
-                flash("Invalid employee record.", "danger")
-                return redirect(url_for("team"))
-            normalized_project_id = int(project_id) if project_id not in (None, "", "None") else None
-            if normalized_project_id not in {None, viewer["project_id"]}:
-                flash("You can only assign employees to your own project or remove them from it.", "danger")
-                return redirect(url_for("employee_detail", user_id=user_id))
-            normalized_manager_id = int(manager_id) if manager_id not in (None, "", "None") else None
-            if normalized_manager_id not in {None, viewer["id"]}:
-                chosen_manager = db.execute("SELECT id, project_id FROM users WHERE id=?", (normalized_manager_id,)).fetchone()
-                if not chosen_manager or chosen_manager["project_id"] != viewer["project_id"]:
-                    flash("You can assign only yourself or a manager from your project.", "danger")
-                    return redirect(url_for("employee_detail", user_id=user_id))
-            db.execute(
-                "UPDATE users SET manager_id=?, project_id=? WHERE id=?",
-                (normalized_manager_id, normalized_project_id, user_id),
-            )
-            project_label = "Unassigned" if normalized_project_id is None else (db.execute("SELECT project_name FROM projects WHERE id=?", (normalized_project_id,)).fetchone() or {}).get("project_name", "Assigned Project")
-            notify_user(user_id, "Project assignment updated", f"Your project assignment was updated to {project_label}.", url_for("employee_detail", user_id=user_id))
-            log_audit("Employee", "Project Assignment Updated", f"Updated project assignment for employee {employee['employee_code']}", user_id)
-            db.commit()
-            flash("Employee project assignment updated successfully.", "success")
-            return redirect(url_for("employee_detail", user_id=user_id))
-
+        if viewer["role"] == "site_manager":
+            manager_id = employee["manager_id"] if employee else manager_id
+            requested_project_id = int(project_id) if project_id not in (None, "") else None
+            viewer_project_id = viewer["project_id"]
+            if requested_project_id not in (None, viewer_project_id):
+                flash("Site Manager can only assign employees to their own project or unassign them.", "danger")
+                return render_template("employee_form.html", departments=departments, designations=designations, managers=managers, employee=employee, projects=projects, role_options=get_role_options(), role_label=role_label, viewer=viewer)
+            project_id = requested_project_id
         if user_id is None:
             db.execute(
                 "INSERT INTO users(full_name, email, employee_code, password_hash, role, department_id, designation_id, manager_id, project_id, phone, address, emergency_contact, join_date, monthly_basic, default_allowances, deduction_per_absent, deduction_per_late, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1652,7 +1624,7 @@ def employee_form_handler(user_id: int | None = None):
         db.commit()
         flash("Employee updated successfully.", "success")
         return redirect(url_for("employee_detail", user_id=user_id))
-    return render_template("employee_form.html", departments=departments, designations=designations, managers=managers, employee=employee, projects=projects, role_options=get_role_options(), role_label=role_label, viewer=viewer, manager_assignment_only=manager_assignment_only)
+    return render_template("employee_form.html", departments=departments, designations=designations, managers=managers, employee=employee, projects=projects, role_options=get_role_options(), role_label=role_label, viewer=viewer)
 
 
 @app.route("/employees/<int:user_id>/delete", methods=["POST"])
