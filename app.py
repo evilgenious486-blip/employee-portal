@@ -1180,8 +1180,12 @@ def my_leaves():
         query += " WHERE la.user_id=?"
         params = (user["id"],)
     elif is_project_scoped_role(user["role"]):
-        query += " WHERE u.project_id=?"
-        params = (user["project_id"],)
+        if user["project_id"]:
+            query += " WHERE (u.project_id=? OR la.user_id=?)"
+            params = (user["project_id"], user["id"])
+        else:
+            query += " WHERE la.user_id=?"
+            params = (user["id"],)
     query += " ORDER BY la.id DESC"
     leaves = db.execute(query, params).fetchall()
     return render_template("leaves.html", leaves=leaves, page_title="Leave Tracking")
