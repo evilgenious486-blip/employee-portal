@@ -231,9 +231,7 @@ def close_db(exception=None):
 
 ADMIN_ROLES = {"admin", "super_admin"}
 HR_ROLES = {"hr"}
-PROJECT_VIEW_ROLES = {"manager", "project_manager"}
-PROJECT_ASSIGNMENT_ROLES = {"site_manager"}
-PROJECT_LEAD_ROLES = PROJECT_VIEW_ROLES | PROJECT_ASSIGNMENT_ROLES
+PROJECT_LEAD_ROLES = {"manager", "project_manager", "site_manager"}
 TEAM_ACCESS_ROLES = ADMIN_ROLES | HR_ROLES | PROJECT_LEAD_ROLES
 
 
@@ -247,10 +245,6 @@ def is_hr_role(role: str | None) -> bool:
 
 def is_project_scoped_role(role: str | None) -> bool:
     return role in PROJECT_LEAD_ROLES
-
-
-def can_assign_project_members(role: str | None) -> bool:
-    return role in PROJECT_ASSIGNMENT_ROLES
 
 
 def can_manage_people(role: str | None) -> bool:
@@ -275,16 +269,11 @@ def visible_user_filter(user: sqlite3.Row, alias: str = "u") -> tuple[str, list[
     role = user["role"]
     if is_admin_role(role) or is_hr_role(role):
         return "1=1", []
-    if role in PROJECT_ASSIGNMENT_ROLES:
-        project_id = user["project_id"]
-        if project_id:
-            return f"({alias}.project_id = ? OR {alias}.project_id IS NULL)", [project_id]
-        return f"{alias}.project_id IS NULL", []
-    if role in PROJECT_VIEW_ROLES:
-        project_id = user["project_id"]
+    project_id = user["project_id"]
+    if role in {"manager", "project_manager", "site_manager"}:
         if project_id:
             return f"{alias}.project_id = ?", [project_id]
-        return "0=1", []
+        return f"{alias}.id = ?", [user["id"]]
     return f"{alias}.id = ?", [user["id"]]
 
 
@@ -1573,35 +1562,27 @@ def employee_form_handler(user_id: int | None = None):
     managers = db.execute("SELECT id, full_name, role, project_id FROM users WHERE role IN ('manager','project_manager','site_manager') AND is_active=1 ORDER BY full_name").fetchall()
     projects = project_choice_rows(db, viewer)
     employee = None
+    viewer_role = viewer["role"] if viewer else None
+    limited_site_manager = viewer_role == "site_manager"
     if user_id is not None:
         employee = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if not employee:
             flash("Employee not found.", "danger")
             return redirect(url_for("team"))
-        if viewer["role"] == "site_manager":
-            if viewer["id"] == employee["id"]:
+        if limited_site_manager:
+            if not viewer["project_id"] or employee["project_id"] != viewer["project_id"]:
+                flash("You can only manage employees assigned to your own project.", "danger")
+                return redirect(url_for("team"))
+            if employee["id"] == viewer["id"]:
                 flash("You cannot change your own project assignment.", "danger")
                 return redirect(url_for("employee_detail", user_id=user_id))
-            viewer_project_id = viewer["project_id"]
-            employee_project_id = employee["project_id"]
-            if not viewer_project_id:
-                flash("Assign your own site manager account to a project first.", "danger")
-                return redirect(url_for("team"))
-            if employee_project_id not in (None, viewer_project_id):
-                flash("Site Manager can only edit employees from the same project or unassigned employees.", "danger")
-                return redirect(url_for("team"))
+    elif limited_site_manager:
+        flash("Site Manager cannot create new employees.", "danger")
+        return redirect(url_for("team"))
     if request.method == "POST":
         form = request.form
         manager_id = form.get("manager_id") or None
         project_id = form.get("project_id") or None
-        if viewer["role"] == "site_manager":
-            manager_id = employee["manager_id"] if employee else manager_id
-            requested_project_id = int(project_id) if project_id not in (None, "") else None
-            viewer_project_id = viewer["project_id"]
-            if requested_project_id not in (None, viewer_project_id):
-                flash("Site Manager can only assign employees to their own project or unassign them.", "danger")
-                return render_template("employee_form.html", departments=departments, designations=designations, managers=managers, employee=employee, projects=projects, role_options=get_role_options(), role_label=role_label, viewer=viewer)
-            project_id = requested_project_id
         if user_id is None:
             db.execute(
                 "INSERT INTO users(full_name, email, employee_code, password_hash, role, department_id, designation_id, manager_id, project_id, phone, address, emergency_contact, join_date, monthly_basic, default_allowances, deduction_per_absent, deduction_per_late, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1615,6 +1596,20 @@ def employee_form_handler(user_id: int | None = None):
             db.commit()
             flash("Employee created successfully.", "success")
             return redirect(url_for("employee_detail", user_id=new_id))
+        if limited_site_manager:
+            requested_project_id = form.get("project_id") or None
+            if requested_project_id not in {None, "", str(employee["project_id"])}:
+                flash("Site Manager can only unassign an employee from the current project.", "danger")
+                return redirect(url_for("employee_detail", user_id=user_id))
+            new_project_id = None if requested_project_id in {None, ""} else employee["project_id"]
+            db.execute(
+                "UPDATE users SET project_id=? WHERE id=?",
+                (new_project_id, user_id),
+            )
+            log_audit("Employee", "Project Updated", f"Site Manager updated project assignment for {employee['employee_code']}", user_id)
+            db.commit()
+            flash("Employee project assignment updated successfully.", "success")
+            return redirect(url_for("employee_detail", user_id=user_id))
         db.execute(
             "UPDATE users SET full_name=?, email=?, employee_code=?, role=?, department_id=?, designation_id=?, manager_id=?, project_id=?, phone=?, address=?, emergency_contact=?, join_date=?, monthly_basic=?, default_allowances=?, deduction_per_absent=?, deduction_per_late=?, is_active=? WHERE id=?",
             (form["full_name"].strip(), form["email"].strip(), form["employee_code"].strip(), form["role"], form["department_id"], form["designation_id"], manager_id, project_id, form["phone"].strip(), form["address"].strip(), form["emergency_contact"].strip(), form["join_date"], float(form.get("monthly_basic") or 0), float(form.get("default_allowances") or 0), float(form.get("deduction_per_absent") or 0), float(form.get("deduction_per_late") or 0), 1 if form.get("is_active", "1") == "1" else 0, user_id),
