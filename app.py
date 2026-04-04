@@ -154,11 +154,10 @@ def upload_file_storage(file, folder: str, allowed_extensions: set[str] | None =
 
     if CLOUDINARY_ENABLED:
         resource_type = "image" if ext in ALLOWED_IMAGE_EXTENSIONS else "raw"
-        public_id = f"{folder}/{datetime.now().strftime('%Y%m%d%H%M%S')}_{secrets.token_hex(6)}_{Path(filename).stem}"
         result = cloudinary.uploader.upload(
             file,
-            folder=None,
-            public_id=public_id,
+            asset_folder=folder,
+            public_id=f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{secrets.token_hex(6)}_{Path(filename).stem}",
             resource_type=resource_type,
             overwrite=False,
             use_filename=False,
